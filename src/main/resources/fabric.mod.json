@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "spotifychat",
+  "version": "${version}",
+  "name": "Spotify Chat",
+  "description": "Type !spotify in chat to share the song you're listening to on Spotify. /spotify opens the settings.",
+  "authors": ["Doelloosleven"],
+  "license": "MIT",
+  "icon": "assets/spotifychat/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["dev.spotifychat.SpotifyChatClient"],
+    "modmenu": ["dev.spotifychat.ModMenuIntegration"]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.1",
+    "minecraft": "~26.2",
+    "java": ">=25",
+    "fabric-api": "*"
+  },
+  "suggests": {
+    "modmenu": "*"
+  }
+}

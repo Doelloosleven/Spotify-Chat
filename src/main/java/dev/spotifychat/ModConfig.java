@@ -1,0 +1,92 @@
+package dev.spotifychat;
+
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import net.fabricmc.loader.api.FabricLoader;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+/** Saved to .minecraft/config/spotifychat.json. Everything here can be changed in the menu (/spotify). */
+public class ModConfig {
+    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    private static final Path PATH = FabricLoader.getInstance().getConfigDir().resolve("spotifychat.json");
+
+    // ---- General
+    /** Master switch: off = the mod ignores every !spotify */
+    public boolean enabled = true;
+    /** true = everyone sees the song, false = only you see it */
+    public boolean publicMessages = true;
+    /** Also send your own "!spotify" message to chat before the song */
+    public boolean showTrigger = true;
+    /** Share the last song (marked "paused") when Spotify is paused */
+    public boolean sharePaused = true;
+    /**
+     * After this many minutes paused, the song counts as "not listening" instead of "paused".
+     * 0 = right away, PAUSED_NEVER = stays "paused" forever.
+     */
+    public int pausedToNothingMinutes = 3;
+    public static final int PAUSED_NEVER = 31;
+    /** Share notPlayingFormat when nothing is playing at all */
+    public boolean shareNothing = true;
+    /** Use the Web API login (phone / web player) when the desktop app has nothing */
+    public boolean useWebApi = true;
+
+    // ---- Hypixel guild & party
+    /** "/gc !spotify" shares your song in guild chat */
+    public boolean guildChat = true;
+    /** "/pc !spotify" shares your song in party chat */
+    public boolean partyChat = true;
+    /** Someone else's "!spotify" in guild chat gets your song back in guild chat */
+    public boolean answerGuild = true;
+    /** Someone else's "!spotify" in party chat gets your song back in party chat */
+    public boolean answerParty = true;
+    /** Minimum seconds between answers to other players (spam protection) */
+    public int answerCooldownSeconds = 10;
+
+    // ---- Message
+    /** Text before the song: "♫ Now playing: Song - Artist, Feat - Album" */
+    public String prefix = "♫ Now playing:";
+    public boolean showSong = true;
+    public boolean showArtist = true;
+    /** Also list featured artists after the main artist (only when the artist is shown) */
+    public boolean showFeatures = true;
+    public boolean showAlbum = true;
+    /** Between song, artist and album */
+    public String separator = " - ";
+    public String pausedSuffix = " (paused)";
+    public String notPlayingFormat = "♫ Not listening to anything right now";
+
+    // ---- Web API login (optional)
+    /** Client ID from your app at developer.spotify.com/dashboard */
+    public String clientId = "";
+    /** Filled in automatically after "/spotify login". Keep this file private. */
+    public String refreshToken = "";
+
+    public static ModConfig load() {
+        try {
+            if (Files.exists(PATH)) {
+                ModConfig cfg = GSON.fromJson(Files.readString(PATH), ModConfig.class);
+                if (cfg != null) {
+                    cfg.save(); // writes options added in newer versions
+                    return cfg;
+                }
+            }
+        } catch (Exception e) {
+            SpotifyChatClient.LOGGER.warn("Could not read {}, using defaults", PATH, e);
+        }
+        ModConfig cfg = new ModConfig();
+        cfg.save();
+        return cfg;
+    }
+
+    public void save() {
+        try {
+            Files.createDirectories(PATH.getParent());
+            Files.writeString(PATH, GSON.toJson(this));
+        } catch (IOException e) {
+            SpotifyChatClient.LOGGER.error("Could not save {}", PATH, e);
+        }
+    }
+}
