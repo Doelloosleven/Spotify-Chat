@@ -64,6 +64,21 @@ public final class SpotifyUi {
         return font.plainSubstrByWidth(text, Math.max(0, maxWidth - font.width("..."))) + "...";
     }
 
+    /** Same as fit, for text drawn in bold: every letter is a pixel wider, so it has to be cut shorter. */
+    public static String fitBold(Font font, String text, int maxWidth) {
+        if (boldWidth(font, text) <= maxWidth) return text;
+        String cut = fit(font, text, maxWidth);
+        String base = cut.endsWith("...") ? cut.substring(0, cut.length() - 3) : cut;
+        while (!base.isEmpty() && boldWidth(font, base.stripTrailing() + "...") > maxWidth) {
+            base = base.substring(0, base.length() - 1);
+        }
+        return base.stripTrailing() + "...";
+    }
+
+    private static int boldWidth(Font font, String text) {
+        return font.width(Component.literal(text).withStyle(ChatFormatting.BOLD));
+    }
+
     /** Spotify-style logo: circle in the menu color with three black "sound wave" bars, 12x12. */
     public static void logo(GuiGraphicsExtractor g, int x, int y) {
         int color = accent();
