@@ -28,9 +28,12 @@ import java.util.concurrent.TimeUnit;
 public final class TrackInfoLookup {
     private TrackInfoLookup() {}
 
-    /** album "" = not found; artists = main artist first, then featured artists (empty = not found) */
-    public record Info(String album, List<String> artists) {
-        static final Info NONE = new Info("", List.of());
+    /**
+     * album "" = not found; artists = main artist first, then featured artists (empty = not found);
+     * coverUrl = album cover image ("" = not found)
+     */
+    public record Info(String album, List<String> artists, String coverUrl) {
+        static final Info NONE = new Info("", List.of(), "");
     }
 
     private static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(4)).build();
@@ -39,6 +42,12 @@ public final class TrackInfoLookup {
     /** Starts the lookup in the background if it isn't cached yet. */
     public static void prefetch(String artist, String song) {
         lookup(artist, song);
+    }
+
+    /** Never waits: the info if the lookup already finished, otherwise null (and the lookup is started). */
+    public static Info peek(String artist, String song) {
+        CompletableFuture<Info> f = lookup(artist, song);
+        return f.isDone() && !f.isCompletedExceptionally() ? f.getNow(null) : null;
     }
 
     /** Info, or NONE if not found within a few seconds. */
@@ -87,10 +96,12 @@ public final class TrackInfoLookup {
                     break;
                 }
             }
-            String album = str(best.getAsJsonObject("album"), "title");
+            JsonObject albumObj = best.getAsJsonObject("album");
+            String album = str(albumObj, "title");
+            String cover = str(albumObj, "cover_medium"); // 250x250
             // Featured artists are only listed on the song's own page; only trust them for the exact song
             List<String> artists = sameSong.isEmpty() ? List.of() : contributors(str(best, "id"));
-            return new Info(album, artists);
+            return new Info(album, artists, cover);
         } catch (Exception e) {
             SpotifyChatClient.LOGGER.debug("Track info lookup failed for {} - {}", artist, song, e);
             throw new RuntimeException(e);

@@ -19,24 +19,77 @@ No login or Spotify developer setup needed: the song is read straight from the *
 | `!spotify` | Share the current song in the chat you're in |
 | `/gc !spotify` / `/pc !spotify` | Share it in guild / party chat (Hypixel) |
 | someone else says `!spotify` in guild or party chat | Your song is sent back to that same channel (max once per 10 s) |
-| `/spotify` | Open the settings menu |
+| `!jam` | Share your Spotify Jam invite link in the chat you're in |
+| `/gc !jam` / `/pc !jam` | Share your Jam link in guild / party chat |
+| someone else says `!jam` in guild or party chat | Your Jam link is sent back (only after you shared it once this session) |
+| `/spotify jam` | Show your Jam link; `/spotify jam <link>` sets it, `/spotify jam clear` forgets it |
+| `/spotify overlay` | Show/hide the song overlay |
+| `/spotify pause` / `next` / `previous` | Play/pause, skip, or go back in the Spotify app |
+| `/spotify` or **F4** | Open the settings menu (F4 again closes it) |
 | `/spotify private` | Only you see the song |
 | `/spotify public` | Everyone sees it (default) |
 | `/spotify help` | Show the commands |
 
+## Spotify Jam
+
+1. In Spotify, start a Jam and click **Invite** > **Copy link**.
+2. Type `!jam` (or `/gc !jam`, `/pc !jam`). The mod takes the link from your clipboard.
+
+Servers like Hypixel punish links in chat ("Advertising is against the rules"), so the **link goes to the Spotify Chat IRC** (see below), where other mod users can click it. In guild and party chat you also get the note "♫ Join my Spotify Jam (link in the Spotify Chat IRC)"; in open chat that note is off by default, so `!jam` there only goes to IRC. Both are switches in the Guild & Party tab. With IRC off, the link is posted in chat on servers that allow it, and never on Hypixel.
+
+The link is remembered until you close the game, so friends can type `!jam` in guild or party chat to get it again (in IRC). Only Spotify Jam links (`spotify.link/...` or `open.spotify.com/socialsession/...`) are ever read from the clipboard.
+
+## IRC chat
+
+Chat with other Spotify Chat users outside the Minecraft server.
+
+- Press **[** (changeable under Keys & Updates): the chat opens with a green **IRC** label, and the message you send goes to IRC instead of the server. **T** still opens normal chat. (`!spotify`, `!jam` and commands work as usual from either.)
+- `/irc <message>` does the same as a command.
+- Messages from IRC show up in your chat as `[IRC] Name: message`, and links in them are clickable.
+
+- Server: **Rizon** (`irc.rizon.net`), encrypted (TLS). Rizon hides your IP address, so other people only see your Minecraft name.
+- There's one channel for everyone: `#spotifychat`. Every Spotify Chat user with IRC on is in it.
+- Anyone with an IRC app can join it too, and names aren't verified, so don't share private things there.
+- Turn it off in the IRC tab; then the mod doesn't connect at all.
+
+## Overlay
+
+A "now playing" card on your screen with the album cover, song, artists and album (or "Paused"). The green bar turns gray when paused. It hides when nothing plays, and after a song has been paused long enough to count as "not listening".
+
+In the menu's **Overlay** tab you can turn it on/off, hide the cover or album name, keep it hidden while paused, change the size (50-200%), and **Move overlay**: drag it anywhere, scroll to resize.
+
+## Keys
+
+In the menu's **Keys & Updates** tab (or Options > Controls > Spotify Chat) you can pick keys for:
+
+- **Open/close Spotify Chat menu** (default **F4**; F3+F4 still opens Minecraft's game mode switcher)
+- **Write to IRC chat** (default **[**)
+- **Play / pause**, **Next song**, **Previous song**: control the Spotify desktop app without leaving the game
+- **Show/hide song overlay**
+
+The rest start without a key, so nothing clashes with your other controls. Click a key, press the new one; Esc removes it. A key turns red if another control uses it too.
+
+On Windows the command goes straight to Spotify's window, so it never pauses another app by accident. macOS uses AppleScript, Linux `playerctl`. Like in Spotify itself, "previous" first jumps to the start of the song.
+
+## Updates
+
+- **Update notifications** (on by default): a chat message with a download link when a new version is on the [GitHub releases page](https://github.com/Doelloosleven/Spotify-Chat/releases).
+- **Auto-update** (off by default): downloads the new version for you and installs it when you close Minecraft. The download only comes from the official GitHub releases, is checked against GitHub's SHA-256 checksum, and must be Spotify Chat for your Minecraft version. Windows keeps a running mod locked, so a small hidden PowerShell step waits for Minecraft to close and then swaps the files.
+
 ## Settings menu
 
-`/spotify` (or the config button in **Mod Menu**, if installed) opens a menu in Spotify colors with three tabs:
+`/spotify` (or the config button in **Mod Menu**, if installed) opens a menu in Spotify colors with six tabs:
 
 - **General**: mod on/off, public/private, share paused songs, share "not listening", show your own `!spotify`, use phone/web player login, and after how long paused a song counts as "not listening" (right away, 1-30 min, or never; default 3 min)
-- **Guild & Party**: `/gc !spotify`, `/pc !spotify`, answer guild members, answer party members, answer cooldown (0-60 s)
+- **Guild & Party**: `/gc !spotify`, `/pc !spotify`, answer guild members, answer party members, `!jam`, answer `!jam`, answer cooldown (0-60 s), and the text before the Jam link
 - **Message**: switches for **Song**, **Artist**, **Featured artists** and **Album** (all on by default), the text before the song, and the "not listening" message, with a live preview
+- **Overlay**, **IRC**, **Keys & Updates**: see above
 
 Example with everything on:
 
 > ♫ Now playing: TIJDSGEEST - Abel, Sef, IJSLAND - IJSLAND 2
 
-The desktop app's window title only has the song and the main artist, so the featured artists and album are looked up in Deezer's free public music search (no account needed) as soon as a new song starts. If the song can't be found, they're left out. With the phone/web login, Spotify's own info is used.
+The desktop app's window title only has the song and the main artist, so the featured artists, album and album cover are looked up in Deezer's free public music search (no account needed) as soon as a new song starts. If the song can't be found, they're left out. With the phone/web login, Spotify's own info is used.
 
 Everything is saved to `config/spotifychat.json`.
 

@@ -2,6 +2,7 @@ package dev.spotifychat;
 
 import com.sun.jna.Native;
 import com.sun.jna.platform.win32.User32;
+import com.sun.jna.platform.win32.WinDef;
 import com.sun.jna.ptr.IntByReference;
 import net.minecraft.util.Util;
 
@@ -51,6 +52,20 @@ public final class LocalSpotify {
         }, 0, interval, TimeUnit.SECONDS);
     }
 
+    /** Check again shortly, e.g. right after skipping a song, so the overlay catches up fast. */
+    public static void refreshSoon() {
+        ScheduledExecutorService w = watcher;
+        if (w == null) return;
+        for (long delay : new long[]{300, 900}) {
+            w.schedule(() -> {
+                try {
+                    read();
+                } catch (Throwable ignored) {
+                }
+            }, delay, TimeUnit.MILLISECONDS);
+        }
+    }
+
     public static Optional<SpotifyClient.Track> nowPlaying() {
         try {
             return read();
@@ -59,6 +74,13 @@ public final class LocalSpotify {
             return Optional.empty();
         }
     }
+
+    /** What the last check found (the overlay reads this, so it never waits for the app) */
+    public static Optional<SpotifyClient.Track> latest() {
+        return latest;
+    }
+
+    private static volatile Optional<SpotifyClient.Track> latest = Optional.empty();
 
     private static synchronized Optional<SpotifyClient.Track> read() throws Exception {
         Optional<SpotifyClient.Track> track = switch (Util.getPlatform()) {
@@ -69,16 +91,22 @@ public final class LocalSpotify {
         };
         if (track.isEmpty() || track.get().playing()) {
             pausedSince = 0;
-            return track;
+        } else {
+            if (pausedSince == 0) pausedSince = System.currentTimeMillis();
+            track = Optional.of(track.get().paused(pausedSince));
         }
-        if (pausedSince == 0) pausedSince = System.currentTimeMillis();
-        return Optional.of(track.get().paused(pausedSince));
+        latest = track;
+        return track;
     }
 
     // -------------------------------------------------------------- Windows
 
-    private static Optional<SpotifyClient.Track> windows() {
-        List<String> titles = new ArrayList<>();
+    /** A visible window of the Spotify desktop app */
+    record SpotifyWindow(WinDef.HWND hwnd, String title) {}
+
+    /** The Spotify app's main window(s): visible, with a title, owned by Spotify.exe. Windows only. */
+    static List<SpotifyWindow> spotifyWindows() {
+        List<SpotifyWindow> found = new ArrayList<>();
         User32 user32 = User32.INSTANCE;
         user32.EnumWindows((hwnd, data) -> {
             if (!user32.IsWindowVisible(hwnd)) return true;
@@ -95,10 +123,14 @@ public final class LocalSpotify {
                     .flatMap(p -> p.info().command())
                     .map(c -> c.toLowerCase(Locale.ROOT).endsWith("spotify.exe"))
                     .orElse(false);
-            if (isSpotify) titles.add(title);
+            if (isSpotify) found.add(new SpotifyWindow(hwnd, title));
             return true;
         }, null);
+        return found;
+    }
 
+    private static Optional<SpotifyClient.Track> windows() {
+        List<String> titles = spotifyWindows().stream().map(SpotifyWindow::title).toList();
         if (titles.isEmpty()) { // Spotify closed
             lastWindowsTrack = null;
             return Optional.empty();
@@ -156,7 +188,7 @@ public final class LocalSpotify {
         return Optional.of(new SpotifyClient.Track(lines[0].trim(), artists, lines[2].trim(), playing));
     }
 
-    private static String run(String... cmd) throws IOException, InterruptedException {
+    static String run(String... cmd) throws IOException, InterruptedException {
         Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
         if (!p.waitFor(3, TimeUnit.SECONDS)) {
             p.destroyForcibly();

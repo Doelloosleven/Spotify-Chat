@@ -1,6 +1,8 @@
 package dev.spotifychat;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.ChatFormatting;
+import net.minecraft.client.KeyMapping;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractButton;
 import net.minecraft.client.gui.components.AbstractSliderButton;
@@ -9,8 +11,10 @@ import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.InputWithModifiers;
+import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
+import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -37,7 +41,7 @@ public class SpotifyConfigScreen extends Screen {
 
     private static final SpotifyClient.Track SAMPLE =
             new SpotifyClient.Track("Song Name", List.of("Artist", "Feature"), "Album Name", true);
-    private static final String[] TABS = {"General", "Guild & Party", "Message"};
+    private static final String[] TABS = {"General", "Guild & Party", "Message", "Overlay", "IRC", "Keys & Updates"};
 
     /** Remembered while the game runs, so the menu reopens on the same tab */
     private static int tab = 0;
@@ -69,9 +73,13 @@ public class SpotifyConfigScreen extends Screen {
         int right = left + colW + 8;
 
         // Tabs, styled like Spotify's filter chips
+        // Padding shrinks on narrow screens so all tabs fit on one line
+        int textTotal = 0;
+        for (String t : TABS) textTotal += font.width(t);
+        int pad = Math.max(8, Math.min(20, (panelW - textTotal - 6 * (TABS.length - 1)) / TABS.length));
         int chipX = panelX;
         for (int i = 0; i < TABS.length; i++) {
-            int w = font.width(TABS[i]) + 20;
+            int w = font.width(TABS[i]) + pad;
             final int index = i;
             addRenderableWidget(new Chip(chipX, 31, w, 16, TABS[i], i == tab, () -> {
                 tab = index;
@@ -85,16 +93,19 @@ public class SpotifyConfigScreen extends Screen {
         switch (tab) {
             case 0 -> y = generalTab(left, right, colW, rowH, step, y);
             case 1 -> y = guildPartyTab(left, right, colW, rowH, step, y);
-            default -> y = messageTab(left, right, colW, rowH, step, y);
+            case 2 -> y = messageTab(left, right, colW, rowH, step, y);
+            case 3 -> y = overlayTab(left, right, colW, rowH, step, y);
+            case 4 -> y = ircTab(left, right, colW, rowH, step, y);
+            default -> y = keysTab(left, right, colW, rowH, step, y);
         }
         panelBottom = y + 4;
 
         int buttonY = Math.min(height - 26, panelBottom + 8);
         int buttonW = Math.min(150, (panelW - 24) / 2);
-        addRenderableWidget(new PillButton(width / 2 - buttonW - 4, buttonY, buttonW, 20,
+        addRenderableWidget(new SpotifyUi.Button(width / 2 - buttonW - 4, buttonY, buttonW, 20,
                 SpotifyChatClient.get().isLoggedIn() ? "Log out phone/web" : "Connect phone/web",
                 false, this::toggleLogin));
-        addRenderableWidget(new PillButton(width / 2 + 4, buttonY, buttonW, 20, "Done", true, this::onClose));
+        addRenderableWidget(new SpotifyUi.Button(width / 2 + 4, buttonY, buttonW, 20, "Done", true, this::onClose));
     }
 
     private int generalTab(int left, int right, int colW, int rowH, int step, int y) {
@@ -144,12 +155,191 @@ public class SpotifyConfigScreen extends Screen {
                 "When a party member says !spotify, your song is sent to party chat.",
                 () -> cfg.answerParty, v -> cfg.answerParty = v);
         y += step;
+        toggle(left, y, colW, rowH, "!jam (Spotify Jam)",
+                "!jam, /gc !jam and /pc !jam share your Jam invite link. "
+                        + "In Spotify: start a Jam, click Invite > Copy link, then type !jam.",
+                () -> cfg.jamEnabled, v -> cfg.jamEnabled = v);
+        toggle(right, y, colW, rowH, "Answer !jam",
+                "When a guild or party member says !jam, your Jam link is sent back "
+                        + "(only after you shared it once this session).",
+                () -> cfg.answerJam, v -> cfg.answerJam = v);
+        y += step;
+        toggle(left, y, colW, rowH, "Jam note: guild/party",
+                "The Jam link goes to IRC. This also posts \"Join my Spotify Jam (link in the Spotify Chat IRC)\" "
+                        + "in guild or party chat when you use /gc !jam or /pc !jam.",
+                () -> cfg.jamNoteGuildParty, v -> cfg.jamNoteGuildParty = v);
+        toggle(right, y, colW, rowH, "Jam note: open chat",
+                "Same note in open chat when you type !jam there. Off: nothing goes to open chat, "
+                        + "the link only goes to IRC.",
+                () -> cfg.jamNoteAllChat, v -> cfg.jamNoteAllChat = v);
+        y += step;
         addRenderableWidget(new ValueSlider(left, y, panelW - 16, rowH, 60,
                 "Answer cooldown: 60s",
-                "Minimum time between answering other players' !spotify, so you don't get muted for spam.",
+                "Minimum time between answering other players' !spotify / !jam, so you don't get muted for spam.",
                 () -> cfg.answerCooldownSeconds, v -> cfg.answerCooldownSeconds = v,
                 v -> "Answer cooldown: " + v + "s"));
+        y += step + 12;
+        box(left, y, panelW - 16, rowH, "Text before the Jam link",
+                cfg.jamPrefix, v -> cfg.jamPrefix = v);
         return y + rowH;
+    }
+
+    private int overlayTab(int left, int right, int colW, int rowH, int step, int y) {
+        toggle(left, y, colW, rowH, "Show overlay",
+                "A \"now playing\" card on your screen. Also: /spotify overlay, or pick a key in Controls.",
+                () -> cfg.overlayEnabled, v -> cfg.overlayEnabled = v);
+        toggle(right, y, colW, rowH, "Album cover",
+                "Show the album cover on the card.",
+                () -> cfg.overlayShowCover, v -> cfg.overlayShowCover = v);
+        y += step;
+        toggle(left, y, colW, rowH, "Album name",
+                "Show the album name under the artist.",
+                () -> cfg.overlayShowAlbum, v -> cfg.overlayShowAlbum = v);
+        toggle(right, y, colW, rowH, "Show when paused",
+                "Keep the card on screen while Spotify is paused (until it counts as \"not listening\").",
+                () -> cfg.overlayShowWhenPaused, v -> cfg.overlayShowWhenPaused = v);
+        y += step;
+        addRenderableWidget(new ValueSlider(left, y, panelW - 16, rowH, 150,
+                "Overlay size: 200%",
+                "How big the card is. You can also scroll while moving it.",
+                () -> cfg.overlayScale - 50, v -> cfg.overlayScale = v + 50,
+                v -> "Overlay size: " + (v + 50) + "%"));
+        y += step;
+        addRenderableWidget(new SpotifyUi.Button(left, y, panelW - 16, rowH, "Move overlay", false,
+                () -> minecraft.gui.setScreen(new OverlayPositionScreen(this))));
+        y += step + 2;
+        labels.add(new Label("Tip: pick a key to show/hide it under Keys & Updates.", left + 2, y));
+        return y + 10;
+    }
+
+    private int ircTab(int left, int right, int colW, int rowH, int step, int y) {
+        SpotifyChatClient client = SpotifyChatClient.get();
+        toggle(left, y, panelW - 16, rowH, "IRC chat with other Spotify Chat users",
+                "Chat outside the Minecraft server (press [ ), and share Jam links there, "
+                        + "because servers like Hypixel punish links in chat.",
+                () -> cfg.ircEnabled, v -> {
+                    cfg.ircEnabled = v;
+                    client.applyIrcSettings();
+                });
+        y += step + 2;
+        IrcClient irc = client.irc();
+        String status = switch (irc.status()) {
+            case CONNECTED -> "Connected as " + irc.nick() + " in " + irc.channel() + " (" + irc.online() + " online)";
+            case CONNECTING -> "Connecting to " + IrcClient.SERVER + "...";
+            case OFF -> "Off";
+        };
+        labels.add(new Label(status, left + 2, y));
+        y += 12;
+        labels.add(new Label("Everyone with Spotify Chat is in " + IrcClient.CHANNEL + " on Rizon (encrypted).",
+                left + 2, y));
+        y += 12;
+        labels.add(new Label("Your IP is hidden; others see your Minecraft name.", left + 2, y));
+        y += 12;
+        labels.add(new Label("Press [ to write to IRC (change it under Keys & Updates), or use /irc <message>.",
+                left + 2, y));
+        return y + 10;
+    }
+
+    private int keysTab(int left, int right, int colW, int rowH, int step, int y) {
+        List<KeyMapping> keys = SpotifyChatClient.get().keys();
+        for (int i = 0; i < keys.size(); i++) {
+            int x = i % 2 == 0 ? left : right;
+            addRenderableWidget(new KeyButton(x, y, colW, rowH, keys.get(i)));
+            if (i % 2 == 1) y += step;
+        }
+        if (keys.size() % 2 == 1) y += step;
+        y += 2;
+        labels.add(new Label("Click a key, then press the new key. Esc = no key. Works in Spotify's desktop app.",
+                left + 2, y));
+        y += 18;
+
+        toggle(left, y, colW, rowH, "Update notifications",
+                "Tell me in chat when a new Spotify Chat version is out.",
+                () -> cfg.updateNotify, v -> cfg.updateNotify = v);
+        toggle(right, y, colW, rowH, "Auto-update",
+                "Download new versions automatically (from the official GitHub page). "
+                        + "They're installed when you close Minecraft.",
+                () -> cfg.autoUpdate, v -> cfg.autoUpdate = v);
+        y += step + 2;
+        UpdateChecker.Release latest = UpdateChecker.latest();
+        String status = "You have " + UpdateChecker.currentVersion() + switch (UpdateChecker.state()) {
+            case AVAILABLE -> ", " + latest.version() + " is out";
+            case INSTALLED_ON_RESTART -> ", " + latest.version() + " installs when you close Minecraft";
+            case FAILED -> ", " + latest.version() + " is out (auto-update failed)";
+            case NONE -> "";
+        };
+        labels.add(new Label(status, left + 2, y));
+        return y + 10;
+    }
+
+    /** The key mapping waiting for a key press, null = none */
+    private KeyMapping listening;
+
+    @Override
+    public boolean keyPressed(KeyEvent event) {
+        if (listening != null) {
+            listening.setKey(event.key() == GLFW.GLFW_KEY_ESCAPE ? InputConstants.UNKNOWN : InputConstants.getKey(event));
+            KeyMapping.resetMapping();
+            minecraft.options.save();
+            listening = null;
+            return true;
+        }
+        // The menu key (F4) closes the menu again, unless you're typing in a text field
+        if (!(getFocused() instanceof EditBox) && SpotifyChatClient.get().menuKey().matches(event)) {
+            onClose();
+            return true;
+        }
+        return super.keyPressed(event);
+    }
+
+    /** Key name on the left, the bound key in a pill on the right; red when another control uses it too. */
+    private class KeyButton extends AbstractButton {
+        private final KeyMapping mapping;
+
+        KeyButton(int x, int y, int w, int h, KeyMapping mapping) {
+            super(x, y, w, h, Component.translatable(mapping.getName()));
+            this.mapping = mapping;
+        }
+
+        @Override
+        public void onPress(InputWithModifiers input) {
+            listening = listening == mapping ? null : mapping;
+        }
+
+        private boolean conflict() {
+            if (mapping.isUnbound()) return false;
+            for (KeyMapping other : minecraft.options.keyMappings) {
+                // F3 shortcuts (like F3+F4) only work while F3 is held, so they don't really clash
+                if (other.getCategory() == KeyMapping.Category.DEBUG) continue;
+                if (other != mapping && other.same(mapping)) return true;
+            }
+            return false;
+        }
+
+        @Override
+        protected void extractContents(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
+            int x = getX(), y = getY(), w = getWidth(), h = getHeight();
+            pill(g, x, y, w, h, isHovered() ? ROW_HOVER : ROW);
+            g.text(font, getMessage(), x + 6, y + (h - 8) / 2, WHITE, false);
+
+            boolean waiting = listening == mapping;
+            String key = waiting ? "Press a key..." : mapping.isUnbound() ? "Not set"
+                    : mapping.getTranslatedKeyMessage().getString();
+            int kw = Math.max(40, font.width(key) + 12), kx = x + w - kw - 4, ky = y + 3;
+            int bg = waiting ? GREEN : conflict() ? 0xFF8B1E1E : ELEVATED;
+            pill(g, kx, ky, kw, h - 6, bg);
+            int color = waiting ? BLACK : mapping.isUnbound() ? GRAY : WHITE;
+            g.text(font, key, kx + (kw - font.width(key)) / 2, y + (h - 8) / 2, color, false);
+            if (conflict() && isHovered()) {
+                g.setTooltipForNextFrame(font, Component.literal("This key is also used by another control"),
+                        mouseX, mouseY);
+            }
+        }
+
+        @Override
+        protected void updateWidgetNarration(NarrationElementOutput output) {
+            defaultButtonNarrationText(output);
+        }
     }
 
     private int messageTab(int left, int right, int colW, int rowH, int step, int y) {
@@ -258,27 +448,16 @@ public class SpotifyConfigScreen extends Screen {
         }
     }
 
-    /** Cuts text with "..." so it fits in maxWidth pixels. */
     private String fit(String text, int maxWidth) {
-        if (font.width(text) <= maxWidth) return text;
-        while (!text.isEmpty() && font.width(text + "...") > maxWidth) text = text.substring(0, text.length() - 1);
-        return text + "...";
+        return SpotifyUi.fit(font, text, maxWidth);
     }
 
-    /** Spotify-style logo: green circle with three black "sound wave" bars. */
     private static void drawLogo(GuiGraphicsExtractor g, int x, int y) {
-        g.fill(x + 3, y, x + 9, y + 12, GREEN);
-        g.fill(x + 1, y + 1, x + 11, y + 11, GREEN);
-        g.fill(x, y + 3, x + 12, y + 9, GREEN);
-        g.fill(x + 3, y + 3, x + 9, y + 4, BLACK);
-        g.fill(x + 3, y + 5, x + 8, y + 6, BLACK);
-        g.fill(x + 4, y + 7, x + 8, y + 8, BLACK);
+        SpotifyUi.logo(g, x, y);
     }
 
-    /** Rectangle with clipped corners, the closest thing to rounded in pixel art. */
     private static void pill(GuiGraphicsExtractor g, int x, int y, int w, int h, int color) {
-        g.fill(x + 1, y, x + w - 1, y + h, color);
-        g.fill(x, y + 1, x + w, y + h - 1, color);
+        SpotifyUi.pill(g, x, y, w, h, color);
     }
 
     @Override
@@ -419,37 +598,6 @@ public class SpotifyConfigScreen extends Screen {
             pill(g, x, y, w, h, bg);
             int tx = x + (w - font.width(getMessage())) / 2;
             g.text(font, getMessage(), tx, y + (h - 8) / 2, selected ? BLACK : WHITE, false);
-        }
-
-        @Override
-        protected void updateWidgetNarration(NarrationElementOutput output) {
-            defaultButtonNarrationText(output);
-        }
-    }
-
-    /** Rounded Spotify button: green with black text (primary) or dark gray with white text. */
-    private class PillButton extends AbstractButton {
-        private final boolean primary;
-        private final Runnable action;
-
-        PillButton(int x, int y, int w, int h, String label, boolean primary, Runnable action) {
-            super(x, y, w, h, Component.literal(label).withStyle(ChatFormatting.BOLD));
-            this.primary = primary;
-            this.action = action;
-        }
-
-        @Override
-        public void onPress(InputWithModifiers input) {
-            action.run();
-        }
-
-        @Override
-        protected void extractContents(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
-            int x = getX(), y = getY(), w = getWidth(), h = getHeight();
-            int bg = primary ? (isHovered() ? GREEN_LIGHT : GREEN) : (isHovered() ? 0xFF3E3E3E : ELEVATED);
-            pill(g, x, y, w, h, bg);
-            int tx = x + (w - font.width(getMessage())) / 2;
-            g.text(font, getMessage(), tx, y + (h - 8) / 2, primary ? BLACK : WHITE, false);
         }
 
         @Override

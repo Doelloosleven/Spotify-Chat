@@ -1,0 +1,9 @@
+{
+  "key.spotifychat.play_pause": "Play / pause",
+  "key.spotifychat.next": "Next song",
+  "key.spotifychat.previous": "Previous song",
+  "key.spotifychat.toggle_overlay": "Show/hide song overlay",
+  "key.spotifychat.irc": "Write to IRC chat",
+  "key.spotifychat.menu": "Open/close Spotify Chat menu",
+  "key.category.spotifychat.main": "Spotify Chat"
+}

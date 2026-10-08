@@ -45,6 +45,37 @@ public class ModConfig {
     /** Minimum seconds between answers to other players (spam protection) */
     public int answerCooldownSeconds = 10;
 
+    // ---- Spotify Jam
+    /** "!jam", "/gc !jam", "/pc !jam" share your Jam invite link (copied in Spotify) */
+    public boolean jamEnabled = true;
+    /** Someone else's "!jam" in guild or party chat gets your Jam link back (only after you shared one) */
+    public boolean answerJam = true;
+    /** Text before the Jam link */
+    public String jamPrefix = "♫ Join my Spotify Jam:";
+    /** With IRC on, the link goes to IRC; these send a note without the link to the server chat too */
+    public boolean jamNoteGuildParty = true;
+    public boolean jamNoteAllChat = false;
+
+    // ---- IRC chat (between Spotify Chat users in #spotifychat on Rizon, outside the Minecraft server)
+    public boolean ircEnabled = true;
+
+    // ---- Updates
+    /** Chat message when a newer version is on GitHub */
+    public boolean updateNotify = true;
+    /** Download new versions automatically; they're installed when Minecraft closes */
+    public boolean autoUpdate = false;
+
+    // ---- Overlay
+    public boolean overlayEnabled = true;
+    public boolean overlayShowCover = true;
+    public boolean overlayShowAlbum = true;
+    public boolean overlayShowWhenPaused = true;
+    /** Top-left corner as a fraction of the screen size, so it stays put when the window is resized */
+    public double overlayX = 0.01;
+    public double overlayY = 0.30;
+    /** Size in percent */
+    public int overlayScale = 100;
+
     // ---- Message
     /** Text before the song: "♫ Now playing: Song - Artist, Feat - Album" */
     public String prefix = "♫ Now playing:";

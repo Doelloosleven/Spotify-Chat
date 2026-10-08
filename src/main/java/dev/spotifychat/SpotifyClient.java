@@ -40,10 +40,16 @@ public class SpotifyClient {
     /**
      * artists: main artist first, then the featured artists.
      * pausedSince: epoch millis when playback was paused, 0 = playing or unknown.
+     * coverUrl: album cover image, "" = unknown.
      */
-    public record Track(String song, List<String> artists, String album, boolean playing, long pausedSince) {
+    public record Track(String song, List<String> artists, String album, boolean playing, long pausedSince,
+                        String coverUrl) {
         public Track(String song, List<String> artists, String album, boolean playing) {
-            this(song, artists, album, playing, 0);
+            this(song, artists, album, playing, 0, "");
+        }
+
+        public Track(String song, List<String> artists, String album, boolean playing, long pausedSince) {
+            this(song, artists, album, playing, pausedSince, "");
         }
 
         /** Main artist */
@@ -57,11 +63,16 @@ public class SpotifyClient {
         }
 
         public Track paused(long since) {
-            return new Track(song, artists, album, false, since);
+            return new Track(song, artists, album, false, since, coverUrl);
         }
 
-        public Track withInfo(String newAlbum, List<String> newArtists) {
-            return new Track(song, newArtists, newAlbum, playing, pausedSince);
+        public Track withInfo(String newAlbum, List<String> newArtists, String newCoverUrl) {
+            return new Track(song, newArtists, newAlbum, playing, pausedSince, newCoverUrl);
+        }
+
+        /** Same song by the same artist (ignores play state and looked-up extras) */
+        public boolean sameSong(Track other) {
+            return other != null && song.equals(other.song) && artist().equals(other.artist());
         }
     }
 
@@ -253,18 +264,41 @@ public class SpotifyClient {
         String song = str(item, "name");
         List<String> names = new ArrayList<>();
         String album = "";
+        String cover = "";
 
         if (item.has("artists")) { // music track
             JsonArray artists = item.getAsJsonArray("artists");
             for (JsonElement a : artists) names.add(str(a.getAsJsonObject(), "name"));
-            if (item.has("album")) album = str(item.getAsJsonObject("album"), "name");
+            if (item.has("album")) {
+                JsonObject albumObj = item.getAsJsonObject("album");
+                album = str(albumObj, "name");
+                cover = smallestImageAtLeast(albumObj, 128);
+            }
         } else if (item.has("show")) { // podcast episode
-            names.add(str(item.getAsJsonObject("show"), "name"));
+            JsonObject show = item.getAsJsonObject("show");
+            names.add(str(show, "name"));
             album = names.getFirst();
+            cover = smallestImageAtLeast(show, 128);
         }
         // "timestamp" = when the playback state last changed, so while paused it's when the pause started
         long changedAt = root.has("timestamp") ? root.get("timestamp").getAsLong() : 0;
-        return Optional.of(new Track(song, names, album, playing, playing ? 0 : changedAt));
+        return Optional.of(new Track(song, names, album, playing, playing ? 0 : changedAt, cover));
+    }
+
+    /** Spotify lists cover sizes 640/300/64; the overlay only needs a small one. */
+    private static String smallestImageAtLeast(JsonObject o, int minSize) {
+        if (!o.has("images") || !o.get("images").isJsonArray()) return "";
+        String best = "";
+        int bestSize = Integer.MAX_VALUE;
+        for (JsonElement el : o.getAsJsonArray("images")) {
+            JsonObject img = el.getAsJsonObject();
+            int size = img.has("width") && !img.get("width").isJsonNull() ? img.get("width").getAsInt() : 0;
+            if (best.isEmpty() || (size >= minSize && size < bestSize)) {
+                best = str(img, "url");
+                bestSize = size >= minSize ? size : Integer.MAX_VALUE;
+            }
+        }
+        return best;
     }
 
     // -------------------------------------------------------------- helpers
