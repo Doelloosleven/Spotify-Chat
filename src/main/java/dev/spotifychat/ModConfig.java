@@ -72,7 +72,7 @@ public class ModConfig {
     /** Chat message when a newer version is on GitHub */
     public boolean updateNotify = true;
     /** Download new versions automatically; they're installed when Minecraft closes */
-    public boolean autoUpdate = false;
+    public boolean autoUpdate = true;
 
     // ---- Overlay
     public boolean overlayEnabled = true;
@@ -100,9 +100,26 @@ public class ModConfig {
     public String pausedSuffix = " (paused)";
     public String notPlayingFormat = "♫ Not listening to anything right now";
 
-    // ---- Keys
+    // ---- Changed defaults
     /** Which round of new default keys this player already got (see SpotifyChatClient.applyNewKeyDefaults) */
     public int keyDefaultsVersion = 0;
+    /** Which round of changed defaults this config already got (see applyNewDefaults) */
+    public int defaultsVersion = 0;
+    private static final int DEFAULTS_VERSION = 1;
+
+    /**
+     * Settings files store every option, so a changed default never reaches players who already had the mod.
+     * Once per round: 1 (1.2.1) = auto-update on for everyone. Returns true if auto-update was switched on,
+     * so the player can be told (they can turn it off again).
+     */
+    boolean applyNewDefaults() {
+        if (defaultsVersion >= DEFAULTS_VERSION) return false;
+        boolean switchedOn = !autoUpdate;
+        autoUpdate = true;
+        defaultsVersion = DEFAULTS_VERSION;
+        save();
+        return switchedOn;
+    }
 
     // ---- Web API login (optional)
     /** Client ID from your app at developer.spotify.com/dashboard */

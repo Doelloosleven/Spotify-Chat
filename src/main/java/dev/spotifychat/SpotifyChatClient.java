@@ -113,6 +113,8 @@ public class SpotifyChatClient implements ClientModInitializer {
     /** True while a chat opened with the IRC key ([) is open: what you send from it goes to IRC */
     private volatile boolean ircMode;
     private boolean updateNotified = false;
+    /** Auto-update was just switched on by the new default: say so once, after joining a world */
+    private boolean autoUpdateNotice = false;
 
     // Overlay
     private volatile SpotifyClient.Track overlayTrack;
@@ -138,6 +140,7 @@ public class SpotifyChatClient implements ClientModInitializer {
     public void onInitializeClient() {
         instance = this;
         config = ModConfig.load();
+        autoUpdateNotice = config.applyNewDefaults();
         spotify = new SpotifyClient(config);
         LocalSpotify.startWatching();
 
@@ -587,6 +590,12 @@ public class SpotifyChatClient implements ClientModInitializer {
 
     /** Once per game start, after joining a world: tell about a new version. */
     private void notifyUpdateOnce() {
+        if (autoUpdateNotice) {
+            autoUpdateNotice = false;
+            info("♫ Spotify Chat now keeps itself up to date: new versions are installed when you close "
+                    + "Minecraft. Don't want that? Turn off Auto-update in /spotify > Keys & Updates.",
+                    ChatFormatting.GREEN);
+        }
         UpdateChecker.State state = UpdateChecker.state();
         if (updateNotified || state == UpdateChecker.State.NONE) return;
         updateNotified = true;
