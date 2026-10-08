@@ -17,7 +17,7 @@
 
 > ♫ Now playing: TIJDSGEEST - Abel, Sef, IJSLAND - IJSLAND 2
 
-## 📦 Install
+## Install
 
 1. Install [Fabric Loader](https://fabricmc.net/use/installer/) and [Fabric API](https://modrinth.com/mod/fabric-api) for Minecraft **26.1.2**, **26.2** or **26.3**.
 2. Download the jar for your Minecraft version from the [latest release](../../releases/latest) (`spotify-chat-<version>+26.2.jar`, `+26.1.2.jar` or `+26.3.jar`) and put it in `.minecraft/mods`. Remove an older Spotify Chat jar. The `.sig` files are for auto-update; you don't need to download them.
@@ -25,18 +25,18 @@
 
 [Mod Menu](https://modrinth.com/mod/modmenu) is optional. It's a client-only mod, so it works on any server.
 
-## ✨ Features
+## Features
 
-- 🎵 **Share your song**: `!spotify` or `!music` in any chat, and `/gc`, `/pc` or `/cc !spotify` for Hypixel guild, party and SkyBlock co-op chat. Featured artists and the album are filled in automatically; a paused song says "(paused)".
-- 🤝 **Answers your friends**: when someone types `!spotify` in guild, party or co-op chat, your song goes back to that same chat (at most once per 10 s, so you don't get muted).
-- 🎉 **Spotify Jam**: copy your Jam link in Spotify and type `!jam`. Hypixel punishes links, so the link goes to the Spotify Chat IRC.
-- 💬 **IRC chat** with everyone who has Spotify Chat, on any server: press <kbd>[</kbd> and type.
-- 🖼️ **Song overlay** with the album cover, in the colors of the album, anywhere on your screen.
-- ⏯️ **Media keys** for the Spotify app: <kbd>←</kbd> previous, <kbd>→</kbd> next, <kbd>↓</kbd> play/pause.
-- ⚙️ **Settings menu** in Spotify colors (or Ocean, Sunset, Bubblegum, Grape, Cherry): <kbd>F4</kbd> or `/spotify`. Every feature has its own switch.
-- 🔄 **Keeps itself up to date**: signed releases are installed when you close Minecraft (you can turn that off).
+- **Share your song**: `!spotify` or `!music` in any chat, and `/gc`, `/pc` or `/cc !spotify` for Hypixel guild, party and SkyBlock co-op chat. Featured artists and the album are filled in automatically; a paused song says "(paused)".
+- **Answers your friends**: when someone types `!spotify` in guild, party or co-op chat, your song goes back to that same chat (at most once per 10 s, so you don't get muted).
+- **Spotify Jam**: copy your Jam link in Spotify and type `!jam`. Hypixel punishes links, so the link goes to the Spotify Chat IRC.
+- **IRC chat** with everyone who has Spotify Chat, on any server: press <kbd>[</kbd> and type.
+- **Song overlay** with the album cover, in the colors of the album, anywhere on your screen.
+- **Media keys** for the Spotify app: <kbd>←</kbd> previous, <kbd>→</kbd> next, <kbd>↓</kbd> play/pause.
+- **Settings menu** in Spotify colors (or Ocean, Sunset, Bubblegum, Grape, Cherry): <kbd>F4</kbd> or `/spotify`. Every feature has its own switch.
+- **Keeps itself up to date**: signed releases are installed when you close Minecraft (you can turn that off).
 
-## ⌨️ Commands & keys
+## Commands & keys
 
 | Command / key | What it does |
 |---|---|
@@ -55,34 +55,34 @@ Someone else's `!spotify`, `!music` or `!jam` in guild, party or co-op chat is a
 
 The media keys go straight to Spotify's window on Windows (AppleScript on macOS, `playerctl` on Linux), so they never pause another app. Like in Spotify itself, "previous" first jumps to the start of the song.
 
-## 🎉 Spotify Jam
+## Spotify Jam
 
 1. In Spotify, start a Jam and click **Invite** > **Copy link**.
 2. Type `!jam` (or `/gc !jam`, `/pc !jam`, `/cc !jam`). The mod takes the link from your clipboard.
 
 Servers like Hypixel punish links in chat ("Advertising is against the rules"), so the **link goes to the Spotify Chat IRC**, where other mod users can click it. Guild, party and co-op chat also get the note "♫ Join my Spotify Jam (link in the Spotify Chat IRC)"; in open chat that note is off by default. With IRC off, the link is posted in chat on servers that allow it, and never on Hypixel. The link is remembered until you close the game, so friends can ask with `!jam`. Only Spotify Jam links (`spotify.link/...` or `open.spotify.com/socialsession/...`) are ever read from the clipboard.
 
-## 💬 IRC chat
+## IRC chat
 
 - Press <kbd>[</kbd>: the chat opens with an **IRC** label, and what you send goes to IRC instead of the server. <kbd>T</kbd> still opens normal chat.
 - Messages show up as `[IRC] Name: message`, with every name in pink and clickable links. Your own message appears once the server has accepted it; if it isn't delivered, you're told.
 - One channel for everyone: `#spotifychat` on **Rizon** (`irc.rizon.net`), encrypted, and the mod checks it's really talking to Rizon. Rizon hides your IP; others see your Minecraft name.
 - Anyone with an IRC app can join too and names aren't verified, so don't share private things there. Turn IRC off in the IRC tab and the mod doesn't connect at all.
 
-## 🖼️ Overlay
+## Overlay
 
 A "now playing" card with the album cover, song, artists and album (or "Paused"). It hides when nothing plays.
 
 - **Album colors** (on by default): a dark gradient of the cover's main colors, with its liveliest color for the bar and text, fading over when the song changes. Off: dark gray with your menu color.
 - In the **Overlay** tab: on/off, cover, album name, show while paused, album colors, size (50-200%), **Move overlay** (drag it anywhere, scroll to resize), and the **menu color**.
 
-## 🔄 Updates
+## Updates
 
 - **Update notifications** (on by default): a chat message with a download link when a new version is on the [releases page](../../releases).
 - **Auto-update** (on by default; turn it off under Keys & Updates): downloads the new version and installs it when you close Minecraft. Only jars signed with the Spotify Chat release key are installed; each jar has a `.sig` next to it, and without a matching signature nothing is installed and you just get the message. The download must start at github.com, GitHub's SHA-256 checksum is checked too, and the jar must be Spotify Chat for your Minecraft version. On Windows a small hidden PowerShell step swaps the files after Minecraft closes; if that can't finish, the old version is put back and the next start tries again.
 - Players who had the mod before 1.2.1 get auto-update switched on once, with a chat message saying how to turn it off. After that the mod never changes it.
 
-## ⚙️ Settings menu
+## Settings menu
 
 <kbd>F4</kbd>, `/spotify` or the config button in **Mod Menu** opens the menu, with six tabs:
 
@@ -93,7 +93,7 @@ A "now playing" card with the album cover, song, artists and album (or "Paused")
 
 Settings are saved to `config/spotifychat.json`; the optional Spotify login has its own file (see below).
 
-## ❓ FAQ
+## FAQ
 
 <details>
 <summary><b>How is the song found?</b></summary>
@@ -138,7 +138,7 @@ The login is stored in `.minecraft/config/spotifychat-secrets.json`. **Never sha
 Antivirus or the browser blocks `.jar` files from Discord. Share the `.zip` from the release instead.
 </details>
 
-## 🛠️ Building
+## Building
 
 Needs **JDK 25**. The same code builds for every supported Minecraft version (things Minecraft moved between versions go through `Mc.java`). Jars end up in `build/libs/`, and `gradlew build` also runs the unit tests in `src/test`:
 
@@ -150,6 +150,6 @@ gradlew build -Pminecraft_version=26.3 -Pfabric_version=0.162.0+26.3 -Pminecraft
 
 **Releases** must be signed, or auto-update won't install them: `tools/sign_release.py` writes a `.sig` next to each jar with the Ed25519 private key whose path is in `SPOTIFY_CHAT_SIGNING_KEY`. Upload every `.sig` together with its jar. The matching public key is `UpdateChecker.RELEASE_PUBLIC_KEY` (`python tools/sign_release.py --public-key` prints it). Never commit the private key.
 
-## 📄 License
+## License
 
 [MIT](LICENSE)
