@@ -60,7 +60,7 @@ public final class UpdateChecker {
      * GitHub's checksum comes from the same API answer as the download, so it can't prove who published a
      * file; this key can. While it's still the placeholder, auto-update refuses to install anything.
      */
-    static final String RELEASE_PUBLIC_KEY = "REPLACE_WITH_BASE64_X509_ED25519_PUBLIC_KEY";
+    static final String RELEASE_PUBLIC_KEY = "MCowBQYDK2VwAyEAegFtW6/DjygPIv2CYnMRzQ9q/y0dj9V6l60vAffaokM=";
     private static final String KEY_PLACEHOLDER = "REPLACE_WITH_BASE64_X509_ED25519_PUBLIC_KEY";
 
     /** Asset names end up in a file path in the mods folder, so only plain jar names are accepted */
