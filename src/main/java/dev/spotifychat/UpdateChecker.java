@@ -102,20 +102,25 @@ public final class UpdateChecker {
         if (Version.parse(tag).compareTo(Version.parse(currentVersion())) <= 0) return; // up to date
 
         // Releases have one jar per Minecraft version: spotify-chat-<mod>+<minecraft>.jar.
-        // Take the one for this Minecraft; a jar without "+..." (older releases) only as a fallback.
+        // Take the one for this Minecraft. On a hotfix like 26.2.1 the 26.2 jar is next best
+        // (verify() still checks it accepts this exact version); a jar without "+..." (older releases) last.
         String mc = minecraftVersion();
+        String mcBase = mc.replaceFirst("^(\\d+\\.\\d+)\\.\\d+$", "$1");
         String jarName = "", jarUrl = "", sha = "";
+        int rank = 0; // 3 = exact, 2 = hotfix's base version, 1 = no "+" in the name
         for (JsonElement el : json.getAsJsonArray("assets")) {
             JsonObject a = el.getAsJsonObject();
             String name = str(a, "name");
-            boolean forThisMc = name.endsWith("+" + mc + ".jar");
-            boolean legacy = name.matches("spotify-chat-[\\w.-]+\\.jar") && jarName.isEmpty();
-            if (name.startsWith("spotify-chat-") && (forThisMc || legacy)) {
+            if (!name.startsWith("spotify-chat-")) continue;
+            int r = name.endsWith("+" + mc + ".jar") ? 3
+                    : name.endsWith("+" + mcBase + ".jar") ? 2
+                    : name.matches("spotify-chat-[\\w.-]+\\.jar") ? 1 : 0;
+            if (r > rank) {
+                rank = r;
                 jarName = name;
                 jarUrl = str(a, "browser_download_url");
                 String digest = str(a, "digest"); // "sha256:..." on newer GitHub releases
                 sha = digest.startsWith("sha256:") ? digest.substring(7).toLowerCase(Locale.ROOT) : "";
-                if (forThisMc) break;
             }
         }
         latest = new Release(tag, str(json, "html_url"), jarName, jarUrl, sha);
@@ -141,6 +146,7 @@ public final class UpdateChecker {
         if (Files.exists(target)) throw new IllegalStateException(r.jarName() + " is already in the mods folder");
         // Fabric ignores files that don't end in .jar, so the download can wait here safely
         Path pending = mods.resolve(r.jarName() + ".pending");
+        Files.deleteIfExists(pending); // left over from an earlier try; the download doesn't overwrite it all
 
         HttpRequest req = HttpRequest.newBuilder(URI.create(r.jarUrl()))
                 .timeout(Duration.ofSeconds(60))
@@ -196,14 +202,24 @@ public final class UpdateChecker {
         }
     }
 
-    /** Waits for this Minecraft to close, then removes the old jar and puts the new one in place. */
+    /**
+     * Waits for this Minecraft to close, then swaps the jars. The old jar is first renamed to .old
+     * (Fabric skips it), retrying while Windows still has it locked; if the new jar can't be put in place,
+     * the old one is put back. So the mods folder never ends up with no Spotify Chat, or with two.
+     * If the old jar stays locked, nothing changes and the next game start tries again.
+     */
     private static void swapAfterExit(Path oldJar, Path pending, Path target) throws Exception {
         long pid = ProcessHandle.current().pid();
+        String old = ps(oldJar), backup = ps(oldJar) + ".old";
         String script = "$p = Get-Process -Id " + pid + " -ErrorAction SilentlyContinue; "
-                + "if ($p) { $p.WaitForExit() }; Start-Sleep -Seconds 1; "
-                + "Remove-Item -LiteralPath '" + ps(oldJar) + "' -Force -ErrorAction SilentlyContinue; "
-                + "if (-not (Test-Path -LiteralPath '" + ps(oldJar) + "')) { "
-                + "Move-Item -LiteralPath '" + ps(pending) + "' -Destination '" + ps(target) + "' -Force }";
+                + "if ($p) { $p.WaitForExit() }; "
+                + "for ($i = 0; $i -lt 30; $i++) { "
+                + "try { Move-Item -LiteralPath '" + old + "' -Destination '" + backup + "' -Force -ErrorAction Stop; "
+                + "break } catch { Start-Sleep -Seconds 1 } }; "
+                + "if (Test-Path -LiteralPath '" + old + "') { exit }; "
+                + "try { Move-Item -LiteralPath '" + ps(pending) + "' -Destination '" + ps(target)
+                + "' -Force -ErrorAction Stop; Remove-Item -LiteralPath '" + backup + "' -Force } "
+                + "catch { Move-Item -LiteralPath '" + backup + "' -Destination '" + old + "' -Force }";
         new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
                 "-Command", script)
                 .redirectErrorStream(true)

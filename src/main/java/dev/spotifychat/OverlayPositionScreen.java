@@ -56,7 +56,7 @@ public class OverlayPositionScreen extends Screen {
         super.extractRenderState(g, mouseX, mouseY, partialTick);
         box = SpotifyOverlay.drawAtConfiguredSpot(g, font, track(), cfg, width, height);
         boolean hover = dragging || inside(mouseX, mouseY);
-        g.outline(box[0] - 1, box[1] - 1, box[2] + 2, box[3] + 2, hover ? GREEN_LIGHT : GREEN);
+        g.outline(box[0] - 1, box[1] - 1, box[2] + 2, box[3] + 2, hover ? accentLight() : accent());
 
         String help = "Drag to move  •  Scroll to resize (" + cfg.overlayScale + "%)  •  Esc when done";
         g.centeredText(font, help, width / 2, 10, WHITE);

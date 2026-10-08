@@ -18,7 +18,7 @@ import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Downloads album covers for the overlay and turns them into a Minecraft texture.
+ * Downloads album covers for the overlay and turns them into a Minecraft texture, plus the cover's colors.
  * Only the current cover is kept in memory; the previous one is released when the next one is ready.
  * Covers are JPEGs, so they're decoded with Java's ImageIO and copied pixel by pixel.
  */
@@ -32,12 +32,14 @@ public final class CoverTextures {
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
 
-    private record Pixels(int[] argb) {}
+    private record Pixels(int[] argb, CoverColors.Palette palette) {}
 
     // Only touched on the render thread
     private static String requestedUrl = "";
     private static String readyUrl = "";
+    private static String failedUrl = "";
     private static Identifier readyId;
+    private static CoverColors.Palette readyPalette;
     private static int counter;
 
     /** Render thread. The texture for this cover if it's loaded; otherwise starts loading it and returns null. */
@@ -48,12 +50,24 @@ public final class CoverTextures {
             CompletableFuture.supplyAsync(() -> download(url)).whenComplete((pixels, err) -> {
                 if (err != null || pixels == null) {
                     SpotifyChatClient.LOGGER.debug("Cover download failed: {}", url, err);
+                    Minecraft.getInstance().execute(() -> failedUrl = url);
                     return;
                 }
                 Minecraft.getInstance().execute(() -> install(url, pixels));
             });
         }
         return url.equals(readyUrl) ? readyId : null;
+    }
+
+    /** Render thread. Colors from this cover; null while it loads, if it failed, or for a black-and-white cover. */
+    public static CoverColors.Palette palette(String url) {
+        if (get(url) == null) return null;
+        return readyPalette;
+    }
+
+    /** Render thread. True while this cover is still downloading. */
+    public static boolean loading(String url) {
+        return url != null && !url.isBlank() && !url.equals(readyUrl) && !url.equals(failedUrl);
     }
 
     private static Pixels download(String url) {
@@ -70,7 +84,8 @@ public final class CoverTextures {
             g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
             g.drawImage(src, 0, 0, SIZE, SIZE, null);
             g.dispose();
-            return new Pixels(scaled.getRGB(0, 0, SIZE, SIZE, null, 0, SIZE));
+            int[] argb = scaled.getRGB(0, 0, SIZE, SIZE, null, 0, SIZE);
+            return new Pixels(argb, CoverColors.from(argb));
         } catch (Exception e) {
             SpotifyChatClient.LOGGER.debug("Could not load cover {}", url, e);
             return null;
@@ -93,6 +108,7 @@ public final class CoverTextures {
         Identifier old = readyId;
         readyId = id;
         readyUrl = url;
+        readyPalette = pixels.palette();
         if (old != null) Minecraft.getInstance().getTextureManager().release(old);
     }
 }

@@ -32,27 +32,36 @@ public class ModConfig {
     public boolean shareNothing = true;
     /** Use the Web API login (phone / web player) when the desktop app has nothing */
     public boolean useWebApi = true;
+    /** Menu color preset, by name (see SpotifyUi.THEMES) */
+    public String menuTheme = "Spotify";
 
-    // ---- Hypixel guild & party
+    // ---- Hypixel guild, party & SkyBlock co-op ("!music" works everywhere "!spotify" does)
     /** "/gc !spotify" shares your song in guild chat */
     public boolean guildChat = true;
     /** "/pc !spotify" shares your song in party chat */
     public boolean partyChat = true;
+    /** "/cc !spotify" shares your song in SkyBlock co-op chat */
+    public boolean coopChat = true;
     /** Someone else's "!spotify" in guild chat gets your song back in guild chat */
     public boolean answerGuild = true;
     /** Someone else's "!spotify" in party chat gets your song back in party chat */
     public boolean answerParty = true;
+    /** Someone else's "!spotify" in co-op chat gets your song back in co-op chat */
+    public boolean answerCoop = true;
     /** Minimum seconds between answers to other players (spam protection) */
     public int answerCooldownSeconds = 10;
 
     // ---- Spotify Jam
-    /** "!jam", "/gc !jam", "/pc !jam" share your Jam invite link (copied in Spotify) */
+    /** "!jam", "/gc !jam", "/pc !jam", "/cc !jam" share your Jam invite link (copied in Spotify) */
     public boolean jamEnabled = true;
-    /** Someone else's "!jam" in guild or party chat gets your Jam link back (only after you shared one) */
+    /** Someone else's "!jam" in guild, party or co-op chat gets your Jam link back (only after you shared one) */
     public boolean answerJam = true;
     /** Text before the Jam link */
     public String jamPrefix = "♫ Join my Spotify Jam:";
-    /** With IRC on, the link goes to IRC; these send a note without the link to the server chat too */
+    /**
+     * With IRC on, the link goes to IRC; these send a note without the link to the server chat too.
+     * jamNoteGuildParty covers co-op chat as well (the name is kept so older settings still load).
+     */
     public boolean jamNoteGuildParty = true;
     public boolean jamNoteAllChat = false;
 
@@ -70,6 +79,8 @@ public class ModConfig {
     public boolean overlayShowCover = true;
     public boolean overlayShowAlbum = true;
     public boolean overlayShowWhenPaused = true;
+    /** Background and accent color taken from the album cover */
+    public boolean overlayAlbumColors = true;
     /** Top-left corner as a fraction of the screen size, so it stays put when the window is resized */
     public double overlayX = 0.01;
     public double overlayY = 0.30;
@@ -88,6 +99,10 @@ public class ModConfig {
     public String separator = " - ";
     public String pausedSuffix = " (paused)";
     public String notPlayingFormat = "♫ Not listening to anything right now";
+
+    // ---- Keys
+    /** Which round of new default keys this player already got (see SpotifyChatClient.applyNewKeyDefaults) */
+    public int keyDefaultsVersion = 0;
 
     // ---- Web API login (optional)
     /** Client ID from your app at developer.spotify.com/dashboard */

@@ -2,7 +2,7 @@
 
 # Spotify Chat (Fabric, Minecraft 26.1.2 / 26.2 / 26.3)
 
-Type `!spotify` in chat and the mod posts what you're listening to:
+Type `!spotify` (or `!music`) in chat and the mod posts what you're listening to:
 
 > ♫ Now playing: Song Name - Artist
 
@@ -18,15 +18,16 @@ No login or Spotify developer setup needed: the song is read straight from the *
 
 | Command | What it does |
 |---|---|
-| `!spotify` | Share the current song in the chat you're in |
-| `/gc !spotify` / `/pc !spotify` | Share it in guild / party chat (Hypixel) |
-| someone else says `!spotify` in guild or party chat | Your song is sent back to that same channel (max once per 10 s) |
+| `!spotify` or `!music` | Share the current song in the chat you're in |
+| `/gc !spotify` / `/pc !spotify` / `/cc !spotify` | Share it in guild / party / SkyBlock co-op chat (Hypixel); `!music` works there too |
+| someone else says `!spotify` or `!music` in guild, party or co-op chat | Your song is sent back to that same channel (max once per 10 s) |
 | `!jam` | Share your Spotify Jam invite link in the chat you're in |
-| `/gc !jam` / `/pc !jam` | Share your Jam link in guild / party chat |
-| someone else says `!jam` in guild or party chat | Your Jam link is sent back (only after you shared it once this session) |
+| `/gc !jam` / `/pc !jam` / `/cc !jam` | Share your Jam link in guild / party / co-op chat |
+| someone else says `!jam` in guild, party or co-op chat | Your Jam link is sent back (only after you shared it once this session) |
 | `/spotify jam` | Show your Jam link; `/spotify jam <link>` sets it, `/spotify jam clear` forgets it |
 | `/spotify overlay` | Show/hide the song overlay |
-| `/spotify pause` / `next` / `previous` | Play/pause, skip, or go back in the Spotify app |
+| **↓** / **→** / **←** | Play/pause, next song, previous song in the Spotify app (changeable) |
+| `/spotify pause` / `next` / `previous` | The same, as commands |
 | `/spotify` or **F4** | Open the settings menu (F4 again closes it) |
 | `/spotify private` | Only you see the song |
 | `/spotify public` | Everyone sees it (default) |
@@ -35,11 +36,11 @@ No login or Spotify developer setup needed: the song is read straight from the *
 ## Spotify Jam
 
 1. In Spotify, start a Jam and click **Invite** > **Copy link**.
-2. Type `!jam` (or `/gc !jam`, `/pc !jam`). The mod takes the link from your clipboard.
+2. Type `!jam` (or `/gc !jam`, `/pc !jam`, `/cc !jam`). The mod takes the link from your clipboard.
 
-Servers like Hypixel punish links in chat ("Advertising is against the rules"), so the **link goes to the Spotify Chat IRC** (see below), where other mod users can click it. In guild and party chat you also get the note "♫ Join my Spotify Jam (link in the Spotify Chat IRC)"; in open chat that note is off by default, so `!jam` there only goes to IRC. Both are switches in the Guild & Party tab. With IRC off, the link is posted in chat on servers that allow it, and never on Hypixel.
+Servers like Hypixel punish links in chat ("Advertising is against the rules"), so the **link goes to the Spotify Chat IRC** (see below), where other mod users can click it. In guild, party and co-op chat you also get the note "♫ Join my Spotify Jam (link in the Spotify Chat IRC)"; in open chat that note is off by default, so `!jam` there only goes to IRC. Both are switches in the Hypixel tab. With IRC off, the link is posted in chat on servers that allow it, and never on Hypixel.
 
-The link is remembered until you close the game, so friends can type `!jam` in guild or party chat to get it again (in IRC). Only Spotify Jam links (`spotify.link/...` or `open.spotify.com/socialsession/...`) are ever read from the clipboard.
+The link is remembered until you close the game, so friends can type `!jam` in guild, party or co-op chat to get it again (in IRC). Only Spotify Jam links (`spotify.link/...` or `open.spotify.com/socialsession/...`) are ever read from the clipboard.
 
 ## IRC chat
 
@@ -56,9 +57,13 @@ Chat with other Spotify Chat users outside the Minecraft server.
 
 ## Overlay
 
-A "now playing" card on your screen with the album cover, song, artists and album (or "Paused"). The green bar turns gray when paused. It hides when nothing plays, and after a song has been paused long enough to count as "not listening".
+A "now playing" card on your screen with the album cover, song, artists and album (or "Paused"). The bar on the left turns gray when paused. It hides when nothing plays, and after a song has been paused long enough to count as "not listening".
 
-In the menu's **Overlay** tab you can turn it on/off, hide the cover or album name, keep it hidden while paused, change the size (50-200%), and **Move overlay**: drag it anywhere, scroll to resize.
+**Album colors** (on by default): the card takes its colors from the album cover. The cover is split into its main colors; the background is a dark gradient from its biggest color to its second one, and its liveliest color is used for the bar and to tint the text. The colors fade over when the song changes. Black-and-white covers stay black and white. With album colors off, the card is dark gray with your menu color.
+
+In the menu's **Overlay** tab you can turn it on/off, hide the cover or album name, keep it hidden while paused, turn album colors on/off, change the size (50-200%), and **Move overlay**: drag it anywhere, scroll to resize.
+
+The **menu color** is in the Overlay tab too: Spotify (green), Ocean, Sunset, Bubblegum, Grape or Cherry. It colors the settings menu, the buttons, the IRC label, and the overlay when album colors are off.
 
 ## Keys
 
@@ -66,24 +71,24 @@ In the menu's **Keys & Updates** tab (or Options > Controls > Spotify Chat) you 
 
 - **Open/close Spotify Chat menu** (default **F4**; F3+F4 still opens Minecraft's game mode switcher)
 - **Write to IRC chat** (default **[**)
-- **Play / pause**, **Next song**, **Previous song**: control the Spotify desktop app without leaving the game
-- **Show/hide song overlay**
+- **Play / pause** (default **↓**), **Next song** (default **→**), **Previous song** (default **←**): control the Spotify desktop app without leaving the game
+- **Show/hide song overlay** (no key by default)
 
-The rest start without a key, so nothing clashes with your other controls. Click a key, press the new one; Esc removes it. A key turns red if another control uses it too.
+Click a key, press the new one; Esc removes it. A key turns red if another control uses it too. If you had Spotify Chat before 1.2.0, the arrow keys are added once, unless you already picked keys for these or another control uses the arrow keys.
 
 On Windows the command goes straight to Spotify's window, so it never pauses another app by accident. macOS uses AppleScript, Linux `playerctl`. Like in Spotify itself, "previous" first jumps to the start of the song.
 
 ## Updates
 
 - **Update notifications** (on by default): a chat message with a download link when a new version is on the [GitHub releases page](https://github.com/Doelloosleven/Spotify-Chat/releases).
-- **Auto-update** (off by default): downloads the new version for you and installs it when you close Minecraft. The download only comes from the official GitHub releases, is checked against GitHub's SHA-256 checksum, and must be Spotify Chat for your Minecraft version. Windows keeps a running mod locked, so a small hidden PowerShell step waits for Minecraft to close and then swaps the files.
+- **Auto-update** (off by default): downloads the new version for you and installs it when you close Minecraft. The download only comes from the official GitHub releases, is checked against GitHub's SHA-256 checksum, and must be Spotify Chat for your Minecraft version. Windows keeps a running mod locked, so a small hidden PowerShell step waits for Minecraft to close and then swaps the files. If the swap can't finish, the old version is put back and the next start tries again.
 
 ## Settings menu
 
-`/spotify` (or the config button in **Mod Menu**, if installed) opens a menu in Spotify colors with six tabs:
+`/spotify` or **F4** (or the config button in **Mod Menu**, if installed) opens a menu in Spotify colors (or another menu color) with six tabs:
 
 - **General**: mod on/off, public/private, share paused songs, share "not listening", show your own `!spotify`, use phone/web player login, and after how long paused a song counts as "not listening" (right away, 1-30 min, or never; default 3 min)
-- **Guild & Party**: `/gc !spotify`, `/pc !spotify`, answer guild members, answer party members, `!jam`, answer `!jam`, answer cooldown (0-60 s), and the text before the Jam link
+- **Hypixel**: `/gc`, `/pc` and `/cc !spotify`, answer guild / party / co-op members, `!jam`, answer `!jam`, the Jam notes, answer cooldown (0-60 s), and the text before the Jam link
 - **Message**: switches for **Song**, **Artist**, **Featured artists** and **Album** (all on by default), the text before the song, and the "not listening" message, with a live preview
 - **Overlay**, **IRC**, **Keys & Updates**: see above
 

@@ -15,12 +15,23 @@ import java.util.List;
 
 import static dev.spotifychat.SpotifyUi.*;
 
-/** "Now playing" card on the HUD: album cover, song, artists and album, in Spotify colors. */
+/**
+ * "Now playing" card on the HUD: album cover, song, artists and album, in Spotify colors
+ * or in the colors of the album cover.
+ */
 public class SpotifyOverlay implements HudElement {
     private static final int PAD = 4;
     private static final int COVER = 32;
     private static final int MAX_TEXT = 150;
     private static final int BACKGROUND = 0xE0121212;
+    /** A new song keeps the old colors this long while its cover is looked up, instead of flashing gray */
+    private static final long COVER_WAIT_MS = 3_000;
+
+    // Colors fade from one song to the next (render thread only)
+    private static CoverColors.Palette shown, target;
+    private static long lastFrame;
+    private static String colorSong = "";
+    private static long colorSongSince;
 
     /** Size of the card at 100%, in GUI pixels */
     public record Size(int width, int height) {}
@@ -84,12 +95,66 @@ public class SpotifyOverlay implements HudElement {
         return new Size(left + textW + PAD + 2, height);
     }
 
+    /** Picks this frame's colors: the album's (faded in) or the normal ones in the menu color. */
+    private static CoverColors.Palette updateColors(SpotifyClient.Track t, ModConfig cfg) {
+        long now = System.currentTimeMillis();
+        String song = t.artist() + " - " + t.song();
+        if (!song.equals(colorSong)) {
+            colorSong = song;
+            colorSongSince = now;
+        }
+
+        CoverColors.Palette next = new CoverColors.Palette(BACKGROUND, BACKGROUND, accent(), GRAY);
+        boolean keepOld = false;
+        if (cfg.overlayAlbumColors) {
+            String url = t.coverUrl();
+            if (url.isBlank()) {
+                keepOld = now - colorSongSince < COVER_WAIT_MS; // the cover may still be looked up
+            } else if (CoverTextures.loading(url)) {
+                CoverTextures.get(url); // starts the download when the cover itself is hidden
+                keepOld = true;
+            } else {
+                CoverColors.Palette p = CoverTextures.palette(url);
+                if (p != null) next = p;
+            }
+        }
+        if (!keepOld || target == null) target = next;
+
+        // Ease towards the target in about half a second; jump if the card wasn't drawn for a while
+        float dt = (now - lastFrame) / 1000f;
+        lastFrame = now;
+        if (shown == null || dt > 1) {
+            shown = target;
+        } else {
+            float k = 1 - (float) Math.exp(-dt * 8);
+            shown = new CoverColors.Palette(CoverColors.mix(shown.left(), target.left(), k),
+                    CoverColors.mix(shown.right(), target.right(), k),
+                    CoverColors.mix(shown.accent(), target.accent(), k),
+                    CoverColors.mix(shown.text(), target.text(), k));
+        }
+        return shown;
+    }
+
+    /** The card's rounded shape, filled with a left-to-right gradient. */
+    private static void gradientPill(GuiGraphicsExtractor g, int w, int h, int left, int right) {
+        if (left == right) {
+            pill(g, 0, 0, w, h, left);
+            return;
+        }
+        for (int x = 0; x < w; x++) {
+            int color = CoverColors.mix(left, right, x / (float) Math.max(1, w - 1));
+            boolean edge = x == 0 || x == w - 1;
+            g.fill(x, edge ? 1 : 0, x + 1, edge ? h - 1 : h, color);
+        }
+    }
+
     /** Draws the card with its top-left corner at 0,0 (the caller positions and scales it). */
     private static void draw(GuiGraphicsExtractor g, Font font, SpotifyClient.Track t, ModConfig cfg, Size size) {
+        CoverColors.Palette colors = updateColors(t, cfg);
         int w = size.width(), h = size.height();
-        pill(g, 0, 0, w, h, BACKGROUND);
-        // Green bar while playing, gray when paused
-        g.fill(1, 3, 3, h - 3, t.playing() ? GREEN : OFF);
+        gradientPill(g, w, h, colors.left(), colors.right());
+        // Bar in the accent color while playing, gray when paused
+        g.fill(1, 3, 3, h - 3, t.playing() ? colors.accent() : OFF);
 
         int textX = PAD + 2;
         if (cfg.overlayShowCover) {
@@ -111,7 +176,8 @@ public class SpotifyOverlay implements HudElement {
         for (int i = 0; i < lines.size(); i++) {
             String text = fit(font, lines.get(i), i == 0 ? MAX_TEXT - 6 : MAX_TEXT);
             Component c = i == 0 ? Component.literal(text).withStyle(ChatFormatting.BOLD) : Component.literal(text);
-            int color = i == 0 ? WHITE : i == 1 ? GRAY : (!t.playing() ? GREEN : DARK_GRAY);
+            int color = i == 0 ? WHITE : i == 1 ? colors.text()
+                    : !t.playing() ? colors.accent() : CoverColors.mix(colors.text(), DARK_GRAY, 0.5f);
             g.text(font, c, textX, y, color, false);
             y += 10;
         }

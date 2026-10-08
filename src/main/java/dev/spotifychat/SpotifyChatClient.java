@@ -42,16 +42,17 @@ import static net.fabricmc.fabric.api.client.command.v2.ClientCommands.argument;
 import static net.fabricmc.fabric.api.client.command.v2.ClientCommands.literal;
 
 /**
- * In chat:
+ * In chat (!music works everywhere !spotify does):
  *   !spotify                  share the current song (your "!spotify" is shown too, if enabled)
- *   /gc !spotify, /pc !spotify   share it in guild / party chat
- *   !jam, /gc !jam, /pc !jam     share your Spotify Jam invite link (copied in Spotify); the link itself
+ *   /gc, /pc, /cc !spotify       share it in guild / party / SkyBlock co-op chat
+ *   !jam, /gc /pc /cc !jam       share your Spotify Jam invite link (copied in Spotify); the link itself
  *                                goes to the IRC channel, since servers like Hypixel punish links
  *   [ key, /irc <message>        write a message to IRC (other Spotify Chat users over Rizon, not via the
  *                                server); T still opens normal chat
- *   Someone else's "!spotify" / "!jam" in guild or party chat is answered in that same channel.
+ *   Someone else's "!spotify" / "!jam" in guild, party or co-op chat is answered in that same channel.
  *
  * Overlay: a "now playing" card on the HUD; /spotify overlay or a key from Controls turns it on/off.
+ * Arrow keys (changeable): left = previous song, right = next song, down = play/pause.
  *
  * The song is read from the Spotify desktop app on this PC, so no login is needed.
  *
@@ -70,12 +71,15 @@ public class SpotifyChatClient implements ClientModInitializer {
     private static final int MAX_CHAT_LENGTH = 256;
     private static final String DASHBOARD_URL = "https://developer.spotify.com/dashboard";
 
-    /** /gc, /pc and Hypixel's long forms (/guild chat, /g chat, /party chat, /p chat) followed by !spotify or !jam */
+    /**
+     * /gc, /pc, /cc and Hypixel's long forms (/guild chat, /g chat, /party chat, /p chat)
+     * followed by !spotify, !music or !jam
+     */
     private static final Pattern OWN_CHANNEL_COMMAND = Pattern.compile(
-            "(gc|pc|(?:guild|g|party|p) chat)\\s+!(spotify|jam)", Pattern.CASE_INSENSITIVE);
-    /** Hypixel: "Guild > [MVP++] Name [Admin]: !spotify" or "Party > [VIP] Name: !jam" */
+            "(gc|pc|cc|(?:guild|g|party|p) chat)\\s+!(spotify|music|jam)", Pattern.CASE_INSENSITIVE);
+    /** Hypixel: "Guild > [MVP++] Name [Admin]: !spotify", "Party > [VIP] Name: !jam", "Co-op > Name: !music" */
     private static final Pattern CHANNEL_MESSAGE = Pattern.compile(
-            "(Guild|Party) > (?:\\[[^\\]]+\\] )?(\\w{1,16})(?: \\[[^\\]]+\\])?: !(spotify|jam)",
+            "(Guild|Party|Co-op) > (?:\\[[^\\]]+\\] )?(\\w{1,16})(?: \\[[^\\]]+\\])?: !(spotify|music|jam)",
             Pattern.CASE_INSENSITIVE);
     /** Spotify Jam invite links: spotify.link short links or open.spotify.com/socialsession/... */
     private static final Pattern JAM_LINK = Pattern.compile(
@@ -145,7 +149,8 @@ public class SpotifyChatClient implements ClientModInitializer {
                 sendIrc(trimmed.substring(IRC_PREFIX.trim().length()).trim());
                 return false; // IRC messages never go to the server
             }
-            boolean trigger = config.enabled && (lower.equals("!jam") || lower.startsWith("!spotify"));
+            boolean trigger = config.enabled
+                    && (lower.equals("!jam") || lower.equals("!music") || lower.startsWith("!spotify"));
             if (ircMode && config.ircEnabled && !trigger) {
                 sendIrc(trimmed); // chat opened with [ : this message goes to IRC (!spotify / !jam work as usual)
                 return false;
@@ -155,6 +160,7 @@ public class SpotifyChatClient implements ClientModInitializer {
                 if (!config.jamEnabled) return true;
                 return ownJam(null) && showTriggerPublicly() && jamGoesToServerChat(null);
             }
+            if (lower.equals("!music")) return ownShare(null) && showTriggerPublicly();
             if (!lower.startsWith("!spotify")) return true;
             String rest = trimmed.substring("!spotify".length()).trim();
             if (!rest.isEmpty() && !Character.isWhitespace(trimmed.charAt("!spotify".length()))) {
@@ -169,16 +175,15 @@ public class SpotifyChatClient implements ClientModInitializer {
             return ownShare(null) && showTriggerPublicly();
         });
 
-        // "/gc !spotify" or "/pc !jam": let the command through, then answer in that same channel.
+        // "/gc !spotify", "/cc !music" or "/pc !jam": let the command through, then answer in that same channel.
         // Some mods send typed commands in a way this doesn't see; the chat echo below covers that.
         ClientSendMessageEvents.ALLOW_COMMAND.register(command -> {
             if (!config.enabled) return true;
             Matcher m = OWN_CHANNEL_COMMAND.matcher(command.trim());
             if (!m.matches()) return true;
             LOGGER.info("Saw own command: /{}", command);
-            boolean guild = m.group(1).toLowerCase(Locale.ROOT).startsWith("g");
-            if (guild ? !config.guildChat : !config.partyChat) return true; // turned off: plain message
-            String channel = guild ? "gc" : "pc";
+            String channel = channelOf(m.group(1));
+            if (!sharesTo(channel)) return true; // turned off: plain message
             if (m.group(2).equalsIgnoreCase("jam")) {
                 if (!config.jamEnabled) return true;
                 return ownJam(channel) && showTriggerPublicly() && jamGoesToServerChat(channel);
@@ -186,18 +191,17 @@ public class SpotifyChatClient implements ClientModInitializer {
             return ownShare(channel) && showTriggerPublicly();
         });
 
-        // "!spotify" / "!jam" shows up in guild or party chat: answer in that channel only
+        // "!spotify" / "!music" / "!jam" shows up in guild, party or co-op chat: answer in that channel only
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
             if (overlay || !config.enabled || !config.publicMessages) return;
             Matcher m = CHANNEL_MESSAGE.matcher(ChatFormatting.stripFormatting(message.getString()).trim());
             if (!m.matches()) return;
-            boolean guild = m.group(1).equalsIgnoreCase("Guild");
-            String channel = guild ? "gc" : "pc";
-            String trigger = m.group(3).toLowerCase(Locale.ROOT);
-            boolean jam = trigger.equals("jam");
+            String channel = channelOf(m.group(1));
+            boolean jam = m.group(3).equalsIgnoreCase("jam");
+            String trigger = jam ? "jam" : "spotify"; // !music is the same as !spotify
             if (jam && !config.jamEnabled) return;
             String me = Minecraft.getInstance().getUser().getName();
-            LOGGER.info("Saw !{} in {} chat from {} (you are {})", trigger, m.group(1), m.group(2), me);
+            LOGGER.info("Saw !{} in {} chat from {} (you are {})", m.group(3), m.group(1), m.group(2), me);
 
             if (m.group(2).equalsIgnoreCase(me)) {
                 // Your own trigger coming back from Hypixel. Skip it if it was already handled when sending.
@@ -205,12 +209,12 @@ public class SpotifyChatClient implements ClientModInitializer {
                     LOGGER.info("Own !{} echo ignored: already handled when sending", trigger);
                     return;
                 }
-                if (guild ? !config.guildChat : !config.partyChat) return;
+                if (!sharesTo(channel)) return;
                 if (jam) ownJam(channel);
                 else ownShare(channel);
                 return;
             }
-            if (guild ? !config.answerGuild : !config.answerParty) return;
+            if (!answers(channel)) return;
             if (jam && (!config.answerJam || jamLink == null)) return; // only once you've shared a Jam
 
             long now = System.currentTimeMillis();
@@ -223,17 +227,16 @@ public class SpotifyChatClient implements ClientModInitializer {
         // Overlay on the HUD
         HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("spotifychat", "overlay"), new SpotifyOverlay());
 
-        // Keys: unbound until you pick them (Spotify menu > Keys & Updates, or Options > Controls)
+        // Keys: change them in the Spotify menu > Keys & Updates, or Options > Controls.
+        // Minecraft's own key codes, since 26.3 numbers keys differently than 26.2.
         KeyMapping.Category category =
                 KeyMapping.Category.register(Identifier.fromNamespaceAndPath("spotifychat", "main"));
-        playPauseKey = registerKey("key.spotifychat.play_pause", category);
-        nextKey = registerKey("key.spotifychat.next", category);
-        previousKey = registerKey("key.spotifychat.previous", category);
-        overlayKey = registerKey("key.spotifychat.toggle_overlay", category);
-        ircKey = KeyMappingHelper.registerKeyMapping(
-                new KeyMapping("key.spotifychat.irc", InputConstants.KEY_LBRACKET, category));
-        menuKey = KeyMappingHelper.registerKeyMapping(
-                new KeyMapping("key.spotifychat.menu", InputConstants.KEY_F4, category));
+        playPauseKey = registerKey("key.spotifychat.play_pause", InputConstants.KEY_DOWN, category);
+        nextKey = registerKey("key.spotifychat.next", InputConstants.KEY_RIGHT, category);
+        previousKey = registerKey("key.spotifychat.previous", InputConstants.KEY_LEFT, category);
+        overlayKey = registerKey("key.spotifychat.toggle_overlay", InputConstants.UNKNOWN.getValue(), category);
+        ircKey = registerKey("key.spotifychat.irc", InputConstants.KEY_LBRACKET, category);
+        menuKey = registerKey("key.spotifychat.menu", InputConstants.KEY_F4, category);
 
         irc = new IrcClient(m -> runOnGame(() -> showIrc(m)), notice -> runOnGame(() -> ircInfo(notice)));
 
@@ -247,7 +250,7 @@ public class SpotifyChatClient implements ClientModInitializer {
                     String label = "IRC";
                     String hint = "this message goes to " + irc.channel();
                     int x = 2, y = s.height - 27, lw = font.width(label) + 8;
-                    SpotifyUi.pill(g, x, y, lw, 11, SpotifyUi.GREEN);
+                    SpotifyUi.pill(g, x, y, lw, 11, SpotifyUi.accent());
                     g.text(font, Component.literal(label).withStyle(ChatFormatting.BOLD), x + 4, y + 2,
                             SpotifyUi.BLACK, false);
                     SpotifyUi.pill(g, x + lw + 2, y, font.width(hint) + 8, 11, 0xC0121212);
@@ -260,6 +263,10 @@ public class SpotifyChatClient implements ClientModInitializer {
 
         // Chat closes itself right after a command runs, so open the menu on the next tick
         ClientTickEvents.END_CLIENT_TICK.register(mc -> {
+            if (!keyDefaultsChecked) {
+                keyDefaultsChecked = true; // options.txt is loaded by now
+                applyNewKeyDefaults(mc);
+            }
             sendPending(mc);
             while (overlayKey.consumeClick()) toggleOverlay();
             while (playPauseKey.consumeClick()) control(SpotifyControls.Action.PLAY_PAUSE);
@@ -321,6 +328,30 @@ public class SpotifyChatClient implements ClientModInitializer {
                         .then(literal("private").executes(ctx -> run(() -> setPublic(false))))));
 
         LOGGER.info("Spotify Chat loaded. Type /spotify in chat for the menu.");
+    }
+
+    /** "gc", "pc" or "cc" for /gc, /guild chat, "Party >", "Co-op >", ... */
+    private static String channelOf(String name) {
+        String n = name.toLowerCase(Locale.ROOT);
+        return n.startsWith("g") ? "gc" : n.startsWith("p") ? "pc" : "cc";
+    }
+
+    /** Your own /gc, /pc or /cc !spotify is switched on for this channel */
+    private boolean sharesTo(String channel) {
+        return switch (channel) {
+            case "gc" -> config.guildChat;
+            case "pc" -> config.partyChat;
+            default -> config.coopChat;
+        };
+    }
+
+    /** Other players' !spotify / !jam in this channel get an answer */
+    private boolean answers(String channel) {
+        return switch (channel) {
+            case "gc" -> config.answerGuild;
+            case "pc" -> config.answerParty;
+            default -> config.answerCoop;
+        };
     }
 
     /** Shares for your own !spotify and remembers it, so the echo from the server is ignored. */
@@ -500,8 +531,39 @@ public class SpotifyChatClient implements ClientModInitializer {
 
     // ------------------------------------------------------- Keys & controls
 
-    private static KeyMapping registerKey(String name, KeyMapping.Category category) {
-        return KeyMappingHelper.registerKeyMapping(new KeyMapping(name, InputConstants.UNKNOWN.getValue(), category));
+    private static KeyMapping registerKey(String name, int defaultKey, KeyMapping.Category category) {
+        return KeyMappingHelper.registerKeyMapping(new KeyMapping(name, defaultKey, category));
+    }
+
+    /** 1: arrow keys for previous / next / play-pause (1.2.0) */
+    private static final int KEY_DEFAULTS_VERSION = 1;
+    private boolean keyDefaultsChecked = false;
+
+    /**
+     * Minecraft saves "no key" for every control in options.txt, so players who had the mod before
+     * the media keys got defaults would never get them. Once, give those unbound keys their default,
+     * unless another control already uses that key.
+     */
+    private void applyNewKeyDefaults(Minecraft mc) {
+        if (config.keyDefaultsVersion >= KEY_DEFAULTS_VERSION) return;
+        boolean changed = false;
+        for (KeyMapping key : List.of(previousKey, nextKey, playPauseKey)) {
+            if (!key.isUnbound()) continue;
+            key.setKey(key.getDefaultKey());
+            boolean taken = false;
+            for (KeyMapping other : mc.options.keyMappings) {
+                if (other != key && other.same(key)) taken = true;
+            }
+            if (taken) key.setKey(InputConstants.UNKNOWN);
+            else changed = true;
+        }
+        if (changed) {
+            KeyMapping.resetMapping();
+            mc.options.save();
+            LOGGER.info("Gave the Spotify media controls their new default keys (arrow keys)");
+        }
+        config.keyDefaultsVersion = KEY_DEFAULTS_VERSION;
+        config.save();
     }
 
     /** Spotify Chat's keys, in the order the menu shows them */
@@ -625,12 +687,14 @@ public class SpotifyChatClient implements ClientModInitializer {
 
     private void help() {
         info("--- Spotify Chat ---", ChatFormatting.GREEN);
-        info("!spotify  - share what's playing in your Spotify app", ChatFormatting.GRAY);
-        info("/gc !spotify, /pc !spotify  - share it in guild / party chat", ChatFormatting.GRAY);
-        info("!jam, /gc !jam, /pc !jam  - share your Spotify Jam link (copy it in Spotify first)",
+        info("!spotify or !music  - share what's playing in your Spotify app", ChatFormatting.GRAY);
+        info("/gc, /pc, /cc !spotify  - share it in guild / party / co-op chat", ChatFormatting.GRAY);
+        info("!jam, /gc /pc /cc !jam  - share your Spotify Jam link (copy it in Spotify first)",
                 ChatFormatting.GRAY);
         info("/spotify overlay  - show/hide the song overlay", ChatFormatting.GRAY);
-        info("/spotify pause | next | previous  - control Spotify (or set keys in the menu)", ChatFormatting.GRAY);
+        info("Arrow keys: left = previous, right = next, down = play/pause (change them in the menu)",
+                ChatFormatting.GRAY);
+        info("/spotify pause | next | previous  - the same as commands", ChatFormatting.GRAY);
         info("[  - write a message to IRC (other Spotify Chat users, outside the server)", ChatFormatting.GRAY);
         info("/irc <message>  - same, as a command", ChatFormatting.GRAY);
         info("/spotify or F4  - open the settings menu", ChatFormatting.GRAY);

@@ -23,24 +23,22 @@ import java.util.function.IntConsumer;
 import java.util.function.IntFunction;
 import java.util.function.IntSupplier;
 
-/** Settings menu in Spotify's colors. Open with /spotify or from Mod Menu. */
+/** Settings menu in Spotify's colors (or another preset). Open with /spotify, F4 or from Mod Menu. */
 public class SpotifyConfigScreen extends Screen {
-    // Spotify palette
+    // Spotify palette; the accent (green by default) comes from SpotifyUi.theme()
     private static final int BLACK = 0xFF000000;
     private static final int BACKGROUND = 0xF2121212;
     private static final int PANEL = 0xFF181818;
     private static final int ROW = 0xFF1F1F1F;
     private static final int ROW_HOVER = 0xFF2A2A2A;
     private static final int ELEVATED = 0xFF282828;
-    private static final int GREEN = 0xFF1DB954;
-    private static final int GREEN_LIGHT = 0xFF1ED760;
     private static final int WHITE = 0xFFFFFFFF;
     private static final int GRAY = 0xFFB3B3B3;
     private static final int OFF = 0xFF535353;
 
     private static final SpotifyClient.Track SAMPLE =
             new SpotifyClient.Track("Song Name", List.of("Artist", "Feature"), "Album Name", true);
-    private static final String[] TABS = {"General", "Guild & Party", "Message", "Overlay", "IRC", "Keys & Updates"};
+    private static final String[] TABS = {"General", "Hypixel", "Message", "Overlay", "IRC", "Keys & Updates"};
 
     /** Remembered while the game runs, so the menu reopens on the same tab */
     private static int tab = 0;
@@ -49,7 +47,7 @@ public class SpotifyConfigScreen extends Screen {
     private final ModConfig cfg;
 
     private final List<EditBox> boxes = new ArrayList<>();
-    private int panelX, panelW, panelTop, panelBottom, previewY = -1;
+    private int panelX, panelW, panelTop, panelBottom, previewY = -1, themeRowY = -1;
 
     public SpotifyConfigScreen(Screen parent) {
         super(Component.literal("Spotify Chat"));
@@ -62,6 +60,7 @@ public class SpotifyConfigScreen extends Screen {
         boxes.clear();
         labels.clear();
         previewY = -1;
+        themeRowY = -1;
         int step = 24;
         int rowH = 20;
 
@@ -91,7 +90,7 @@ public class SpotifyConfigScreen extends Screen {
         int y = panelTop + 8;
         switch (tab) {
             case 0 -> y = generalTab(left, right, colW, rowH, step, y);
-            case 1 -> y = guildPartyTab(left, right, colW, rowH, step, y);
+            case 1 -> y = hypixelTab(left, right, colW, rowH, step, y);
             case 2 -> y = messageTab(left, right, colW, rowH, step, y);
             case 3 -> y = overlayTab(left, right, colW, rowH, step, y);
             case 4 -> y = ircTab(left, right, colW, rowH, step, y);
@@ -109,7 +108,7 @@ public class SpotifyConfigScreen extends Screen {
 
     private int generalTab(int left, int right, int colW, int rowH, int step, int y) {
         toggle(left, y, colW, rowH, "Mod enabled",
-                "Turn off to make the mod ignore every !spotify.",
+                "Turn off to make the mod ignore every !spotify, !music and !jam.",
                 () -> cfg.enabled, v -> cfg.enabled = v);
         toggle(right, y, colW, rowH, "Public messages",
                 "On: everyone sees your song. Off: only you see it.",
@@ -139,33 +138,42 @@ public class SpotifyConfigScreen extends Screen {
         return y + rowH;
     }
 
-    private int guildPartyTab(int left, int right, int colW, int rowH, int step, int y) {
-        toggle(left, y, colW, rowH, "/gc !spotify",
-                "Typing /gc !spotify shares your song in guild chat.",
+    /** Hypixel chats: guild (/gc), party (/pc) and SkyBlock co-op (/cc), three switches per row */
+    private int hypixelTab(int left, int right, int colW, int rowH, int step, int y) {
+        int thirdW = (panelW - 16 - 16) / 3;
+        int middle = left + thirdW + 8, last = middle + thirdW + 8;
+        toggle(left, y, thirdW, rowH, "/gc !spotify",
+                "Typing /gc !spotify (or /gc !music) shares your song in guild chat.",
                 () -> cfg.guildChat, v -> cfg.guildChat = v);
-        toggle(right, y, colW, rowH, "/pc !spotify",
-                "Typing /pc !spotify shares your song in party chat.",
+        toggle(middle, y, thirdW, rowH, "/pc !spotify",
+                "Typing /pc !spotify (or /pc !music) shares your song in party chat.",
                 () -> cfg.partyChat, v -> cfg.partyChat = v);
+        toggle(last, y, thirdW, rowH, "/cc !spotify",
+                "Typing /cc !spotify (or /cc !music) shares your song in SkyBlock co-op chat.",
+                () -> cfg.coopChat, v -> cfg.coopChat = v);
         y += step;
-        toggle(left, y, colW, rowH, "Answer guild",
-                "When a guild member says !spotify, your song is sent to guild chat.",
+        toggle(left, y, thirdW, rowH, "Answer guild",
+                "When a guild member says !spotify or !music, your song is sent to guild chat.",
                 () -> cfg.answerGuild, v -> cfg.answerGuild = v);
-        toggle(right, y, colW, rowH, "Answer party",
-                "When a party member says !spotify, your song is sent to party chat.",
+        toggle(middle, y, thirdW, rowH, "Answer party",
+                "When a party member says !spotify or !music, your song is sent to party chat.",
                 () -> cfg.answerParty, v -> cfg.answerParty = v);
+        toggle(last, y, thirdW, rowH, "Answer co-op",
+                "When a co-op member says !spotify or !music, your song is sent to co-op chat.",
+                () -> cfg.answerCoop, v -> cfg.answerCoop = v);
         y += step;
         toggle(left, y, colW, rowH, "!jam (Spotify Jam)",
-                "!jam, /gc !jam and /pc !jam share your Jam invite link. "
+                "!jam, /gc !jam, /pc !jam and /cc !jam share your Jam invite link. "
                         + "In Spotify: start a Jam, click Invite > Copy link, then type !jam.",
                 () -> cfg.jamEnabled, v -> cfg.jamEnabled = v);
         toggle(right, y, colW, rowH, "Answer !jam",
-                "When a guild or party member says !jam, your Jam link is sent back "
+                "When a guild, party or co-op member says !jam, your Jam link is sent back "
                         + "(only after you shared it once this session).",
                 () -> cfg.answerJam, v -> cfg.answerJam = v);
         y += step;
-        toggle(left, y, colW, rowH, "Jam note: guild/party",
+        toggle(left, y, colW, rowH, "Jam note: guild/party/co-op",
                 "The Jam link goes to IRC. This also posts \"Join my Spotify Jam (link in the Spotify Chat IRC)\" "
-                        + "in guild or party chat when you use /gc !jam or /pc !jam.",
+                        + "in guild, party or co-op chat when you use /gc !jam, /pc !jam or /cc !jam.",
                 () -> cfg.jamNoteGuildParty, v -> cfg.jamNoteGuildParty = v);
         toggle(right, y, colW, rowH, "Jam note: open chat",
                 "Same note in open chat when you type !jam there. Off: nothing goes to open chat, "
@@ -198,24 +206,38 @@ public class SpotifyConfigScreen extends Screen {
                 "Keep the card on screen while Spotify is paused (until it counts as \"not listening\").",
                 () -> cfg.overlayShowWhenPaused, v -> cfg.overlayShowWhenPaused = v);
         y += step;
+        toggle(left, y, colW, rowH, "Album colors",
+                "Color the card like the album cover: a gradient of the cover's main colors, "
+                        + "and its liveliest color for the bar and text. Off: dark gray with your menu color.",
+                () -> cfg.overlayAlbumColors, v -> cfg.overlayAlbumColors = v);
+        addRenderableWidget(new SpotifyUi.Button(right, y, colW, rowH, "Move overlay", false,
+                () -> Mc.setScreen(new OverlayPositionScreen(this))));
+        y += step;
         addRenderableWidget(new ValueSlider(left, y, panelW - 16, rowH, 150,
                 "Overlay size: 200%",
                 "How big the card is. You can also scroll while moving it.",
                 () -> cfg.overlayScale - 50, v -> cfg.overlayScale = v + 50,
                 v -> "Overlay size: " + (v + 50) + "%"));
         y += step;
-        addRenderableWidget(new SpotifyUi.Button(left, y, panelW - 16, rowH, "Move overlay", false,
-                () -> Mc.setScreen(new OverlayPositionScreen(this))));
-        y += step + 2;
-        labels.add(new Label("Tip: pick a key to show/hide it under Keys & Updates.", left + 2, y));
-        return y + 10;
+        // Menu color: a row with the name on the left and a swatch per preset on the right
+        themeRowY = y;
+        int sw = 18, gap = 4;
+        int sx = panelX + panelW - 8 - 6 - SpotifyUi.THEMES.size() * (sw + gap) + gap;
+        for (SpotifyUi.Theme t : SpotifyUi.THEMES) {
+            Swatch s = new Swatch(sx, y + (rowH - 12) / 2, sw, 12, t);
+            s.setTooltip(Tooltip.create(Component.literal(t.name())));
+            addRenderableWidget(s);
+            sx += sw + gap;
+        }
+        return y + rowH;
     }
 
     private int ircTab(int left, int right, int colW, int rowH, int step, int y) {
         SpotifyChatClient client = SpotifyChatClient.get();
         toggle(left, y, panelW - 16, rowH, "IRC chat with other Spotify Chat users",
-                "Chat outside the Minecraft server (press [ ), and share Jam links there, "
-                        + "because servers like Hypixel punish links in chat.",
+                "Chat outside the Minecraft server, and share Jam links there, because servers like Hypixel "
+                        + "punish links in chat. Everyone is in " + IrcClient.CHANNEL + " on Rizon (encrypted); "
+                        + "your IP is hidden and others see your Minecraft name.",
                 () -> cfg.ircEnabled, v -> {
                     cfg.ircEnabled = v;
                     client.applyIrcSettings();
@@ -229,13 +251,7 @@ public class SpotifyConfigScreen extends Screen {
         };
         labels.add(new Label(status, left + 2, y));
         y += 12;
-        labels.add(new Label("Everyone with Spotify Chat is in " + IrcClient.CHANNEL + " on Rizon (encrypted).",
-                left + 2, y));
-        y += 12;
-        labels.add(new Label("Your IP is hidden; others see your Minecraft name.", left + 2, y));
-        y += 12;
-        labels.add(new Label("Press [ to write to IRC (change it under Keys & Updates), or use /irc <message>.",
-                left + 2, y));
+        labels.add(new Label("Press [ or type /irc <message> to write.", left + 2, y));
         return y + 10;
     }
 
@@ -325,7 +341,7 @@ public class SpotifyConfigScreen extends Screen {
             String key = waiting ? "Press a key..." : mapping.isUnbound() ? "Not set"
                     : mapping.getTranslatedKeyMessage().getString();
             int kw = Math.max(40, font.width(key) + 12), kx = x + w - kw - 4, ky = y + 3;
-            int bg = waiting ? GREEN : conflict() ? 0xFF8B1E1E : ELEVATED;
+            int bg = waiting ? SpotifyUi.accent() : conflict() ? 0xFF8B1E1E : ELEVATED;
             pill(g, kx, ky, kw, h - 6, bg);
             int color = waiting ? BLACK : mapping.isUnbound() ? GRAY : WHITE;
             g.text(font, key, kx + (kw - font.width(key)) / 2, y + (h - 8) / 2, color, false);
@@ -415,14 +431,19 @@ public class SpotifyConfigScreen extends Screen {
         g.fill(0, 0, width, height, BACKGROUND);
         // Top bar
         g.fill(0, 0, width, 24, BLACK);
-        g.fill(0, 24, width, 25, GREEN);
+        g.fill(0, 24, width, 25, SpotifyUi.accent());
         // Panel
         g.fill(panelX, panelTop, panelX + panelW, panelBottom, PANEL);
         // Text field backgrounds
         for (EditBox box : boxes) {
             int x = box.getX() - 6, y = box.getY() - 5, w = box.getWidth() + 12, h = 19;
-            pill(g, x, y, w, h, box.isFocused() ? GREEN : ELEVATED);
+            pill(g, x, y, w, h, box.isFocused() ? SpotifyUi.accent() : ELEVATED);
             pill(g, x + 1, y + 1, w - 2, h - 2, ELEVATED);
+        }
+        // Menu color row (the swatches are widgets on top of it)
+        if (themeRowY >= 0) {
+            pill(g, panelX + 8, themeRowY, panelW - 16, 20, ROW);
+            g.text(font, "Menu color: " + SpotifyUi.theme().name(), panelX + 14, themeRowY + 6, WHITE, false);
         }
     }
 
@@ -433,7 +454,8 @@ public class SpotifyConfigScreen extends Screen {
         drawLogo(g, panelX + 8, 6);
         g.text(font, Component.literal("Spotify Chat").withStyle(ChatFormatting.BOLD), panelX + 24, 8, WHITE, false);
         String status = cfg.enabled ? "ON" : "OFF";
-        g.text(font, status, panelX + panelW - 8 - font.width(status), 8, cfg.enabled ? GREEN : GRAY, false);
+        g.text(font, status, panelX + panelW - 8 - font.width(status), 8, cfg.enabled ? SpotifyUi.accent() : GRAY,
+                false);
 
         for (Label l : labels) {
             g.text(font, l.text(), l.x(), l.y(), GRAY, false);
@@ -443,7 +465,7 @@ public class SpotifyConfigScreen extends Screen {
             int x = panelX + 8 + font.width("Preview: ");
             String preview = fit(SpotifyChatClient.get().formatTrack(SAMPLE), panelX + panelW - 8 - x);
             g.text(font, "Preview: ", panelX + 8, previewY, GRAY, false);
-            g.text(font, preview, x, previewY, GREEN, false);
+            g.text(font, preview, x, previewY, SpotifyUi.accent(), false);
         }
     }
 
@@ -492,7 +514,7 @@ public class SpotifyConfigScreen extends Screen {
             g.text(font, getMessage(), x + 6, y + (h - 8) / 2, on ? WHITE : GRAY, false);
 
             int sw = 20, sh = 10, sx = x + w - sw - 6, sy = y + (h - sh) / 2;
-            pill(g, sx, sy, sw, sh, on ? (isHovered() ? GREEN_LIGHT : GREEN) : OFF);
+            pill(g, sx, sy, sw, sh, on ? (isHovered() ? SpotifyUi.accentLight() : SpotifyUi.accent()) : OFF);
             int knob = sh - 4;
             int kx = on ? sx + sw - knob - 2 : sx + 2;
             pill(g, kx, sy + 2, knob, knob, on ? BLACK : WHITE);
@@ -569,8 +591,39 @@ public class SpotifyConfigScreen extends Screen {
             int tx = trackX(), tw = trackW(), ty = y + h / 2 - 2;
             pill(g, tx, ty, tw, 4, OFF);
             int filled = (int) (value * tw);
-            pill(g, tx, ty, Math.max(2, filled), 4, isHovered() ? GREEN_LIGHT : GREEN);
+            pill(g, tx, ty, Math.max(2, filled), 4, isHovered() ? SpotifyUi.accentLight() : SpotifyUi.accent());
             pill(g, tx + filled - 4, ty - 2, 8, 8, WHITE);
+        }
+    }
+
+    /** A color preset to click; the picked one has a white ring around it. */
+    private class Swatch extends AbstractButton {
+        private final SpotifyUi.Theme theme;
+
+        Swatch(int x, int y, int w, int h, SpotifyUi.Theme theme) {
+            super(x, y, w, h, Component.literal(theme.name()));
+            this.theme = theme;
+        }
+
+        @Override
+        public void onPress(InputWithModifiers input) {
+            cfg.menuTheme = theme.name();
+            cfg.save();
+        }
+
+        @Override
+        protected void extractContents(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
+            int x = getX(), y = getY(), w = getWidth(), h = getHeight();
+            if (SpotifyUi.theme() == theme) {
+                pill(g, x - 2, y - 2, w + 4, h + 4, WHITE);
+                pill(g, x - 1, y - 1, w + 2, h + 2, ROW);
+            }
+            pill(g, x, y, w, h, isHovered() ? theme.light() : theme.accent());
+        }
+
+        @Override
+        protected void updateWidgetNarration(NarrationElementOutput output) {
+            defaultButtonNarrationText(output);
         }
     }
 
