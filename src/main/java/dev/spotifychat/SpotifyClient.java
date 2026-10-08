@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
 import java.io.IOException;
@@ -77,6 +78,7 @@ public class SpotifyClient {
     }
 
     private final ModConfig config;
+    private final Secrets secrets;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     private final SecureRandom random = new SecureRandom();
 
@@ -86,10 +88,27 @@ public class SpotifyClient {
 
     public SpotifyClient(ModConfig config) {
         this.config = config;
+        this.secrets = Secrets.load();
+        // Older versions kept the login in spotifychat.json: move it out once
+        if (config.refreshToken != null) {
+            if (!config.refreshToken.isBlank() && secrets.refreshToken.isBlank()) {
+                secrets.refreshToken = config.refreshToken;
+                secrets.save();
+            }
+            config.refreshToken = null;
+            config.save();
+        }
     }
 
     public boolean isLoggedIn() {
-        return !config.refreshToken.isBlank();
+        return !secrets.refreshToken.isBlank();
+    }
+
+    /** Forgets the login (log out, or a new Client ID) */
+    public synchronized void logout() {
+        secrets.refreshToken = "";
+        secrets.save();
+        accessToken = null;
     }
 
     // ---------------------------------------------------------------- login
@@ -123,27 +142,27 @@ public class SpotifyClient {
         }));
         server.createContext("/callback", exchange -> {
             Map<String, String> q = parseQuery(exchange.getRequestURI().getRawQuery());
+            // Without our state it isn't Spotify answering this login (another page poking the port, an old
+            // tab): it must neither finish nor fail the login
+            byte[] given = q.getOrDefault("state", "").getBytes(StandardCharsets.UTF_8);
+            if (!MessageDigest.isEqual(state.getBytes(StandardCharsets.UTF_8), given)) {
+                respond(exchange, PAGE_IGNORED);
+                return;
+            }
+            // Fixed pages only: nothing from the request is ever put into the HTML
             String page;
             try {
                 if (q.containsKey("error")) {
                     throw new IOException("Spotify said: " + q.get("error"));
                 }
-                if (!state.equals(q.get("state"))) {
-                    throw new IOException("State mismatch, try again");
-                }
                 exchangeCode(q.get("code"), verifier);
-                page = "<h2>Logged in! You can close this tab and go back to Minecraft.</h2>";
+                page = PAGE_OK;
                 done.complete(null);
             } catch (Exception e) {
-                page = "<h2>Login failed: " + e.getMessage() + "</h2>";
+                page = PAGE_FAILED; // the reason is shown in Minecraft's chat
                 done.completeExceptionally(e);
             }
-            byte[] body = page.getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
-            exchange.sendResponseHeaders(200, body.length);
-            try (OutputStream os = exchange.getResponseBody()) {
-                os.write(body);
-            }
+            respond(exchange, page);
             CompletableFuture.runAsync(this::stopLoginServer);
         });
         server.start();
@@ -157,6 +176,20 @@ public class SpotifyClient {
     }
 
     public record LoginSession(String url, CompletableFuture<Void> result) {}
+
+    private static final String PAGE_OK = "<h2>Logged in! You can close this tab and go back to Minecraft.</h2>";
+    private static final String PAGE_FAILED = "<h2>Login failed. The reason is shown in Minecraft.</h2>";
+    private static final String PAGE_IGNORED = "<h2>This isn't the Spotify Chat login you started. "
+            + "Use the link from Minecraft.</h2>";
+
+    private static void respond(HttpExchange exchange, String page) throws IOException {
+        byte[] body = page.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
+        exchange.sendResponseHeaders(200, body.length);
+        try (OutputStream os = exchange.getResponseBody()) {
+            os.write(body);
+        }
+    }
 
     private synchronized void stopLoginServer() {
         if (loginServer != null) {
@@ -182,7 +215,7 @@ public class SpotifyClient {
         if (!isLoggedIn()) throw new IOException("Not logged in. Type /spotify login");
         JsonObject json = postToken(Map.of(
                 "grant_type", "refresh_token",
-                "refresh_token", config.refreshToken,
+                "refresh_token", secrets.refreshToken,
                 "client_id", config.clientId));
         handleTokenResponse(json);
         return accessToken;
@@ -192,8 +225,8 @@ public class SpotifyClient {
         accessToken = json.get("access_token").getAsString();
         accessTokenExpiresAt = System.currentTimeMillis() + json.get("expires_in").getAsLong() * 1000L;
         if (json.has("refresh_token")) {
-            config.refreshToken = json.get("refresh_token").getAsString();
-            config.save();
+            secrets.refreshToken = json.get("refresh_token").getAsString();
+            secrets.save();
         }
     }
 
@@ -212,8 +245,8 @@ public class SpotifyClient {
         if (res.statusCode() != 200) {
             if (res.body().contains("invalid_grant")) {
                 // Refresh token revoked or expired: force a fresh login
-                config.refreshToken = "";
-                config.save();
+                secrets.refreshToken = "";
+                secrets.save();
                 throw new IOException("Spotify login expired. Type /spotify login");
             }
             throw new IOException("Token request failed (" + res.statusCode() + "): " + res.body());

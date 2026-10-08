@@ -108,7 +108,13 @@ public final class TrackInfoLookup {
         }
     }
 
+    /** Deezer track ids are plain numbers; anything else could change the URL it's put into */
+    static boolean isTrackId(String id) {
+        return id.matches("\\d{1,20}");
+    }
+
     private static List<String> contributors(String trackId) {
+        if (!isTrackId(trackId)) return List.of();
         try {
             JsonElement list = get("https://api.deezer.com/track/" + trackId).get("contributors");
             if (list == null || !list.isJsonArray()) return List.of();

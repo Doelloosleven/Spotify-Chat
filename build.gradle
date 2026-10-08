@@ -17,6 +17,7 @@ repositories {
         name = 'TerraformersMC'
         url = 'https://maven.terraformersmc.com/releases/'
     }
+    mavenCentral()
 }
 
 dependencies {
@@ -25,6 +26,15 @@ dependencies {
     implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
     // Optional: only for the settings button in Mod Menu
     compileOnly("com.terraformersmc:modmenu:${project.modmenu_version}") { transitive = false }
+
+    // Unit tests for the parts that don't need a running game
+    testImplementation platform("org.junit:junit-bom:5.13.4")
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+test {
+    useJUnitPlatform()
 }
 
 processResources {
