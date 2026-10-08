@@ -3,7 +3,9 @@ plugins {
     id 'net.fabricmc.fabric-loom' version "${loom_version}"
 }
 
-version = project.mod_version
+// One jar per Minecraft version: spotify-chat-<mod>+<minecraft>.jar
+// Build another version with e.g.  gradlew build -Pminecraft_version=26.3 -Pfabric_version=0.162.0+26.3 -Pminecraft_dep=~26.3
+version = "${project.mod_version}+${project.minecraft_version}"
 group = project.maven_group
 
 base {
@@ -26,9 +28,11 @@ dependencies {
 }
 
 processResources {
-    inputs.property "version", project.version
+    // The mod's own version stays plain (e.g. 1.1.1) so the update checker compares versions cleanly
+    inputs.property "version", project.mod_version
+    inputs.property "minecraft_dep", project.minecraft_dep
     filesMatching("fabric.mod.json") {
-        expand "version": project.version
+        expand "version": project.mod_version, "minecraft_dep": project.minecraft_dep
     }
 }
 

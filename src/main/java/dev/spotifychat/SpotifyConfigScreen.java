@@ -14,7 +14,6 @@ import net.minecraft.client.input.InputWithModifiers;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
-import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -206,7 +205,7 @@ public class SpotifyConfigScreen extends Screen {
                 v -> "Overlay size: " + (v + 50) + "%"));
         y += step;
         addRenderableWidget(new SpotifyUi.Button(left, y, panelW - 16, rowH, "Move overlay", false,
-                () -> minecraft.gui.setScreen(new OverlayPositionScreen(this))));
+                () -> Mc.setScreen(new OverlayPositionScreen(this))));
         y += step + 2;
         labels.add(new Label("Tip: pick a key to show/hide it under Keys & Updates.", left + 2, y));
         return y + 10;
@@ -278,7 +277,7 @@ public class SpotifyConfigScreen extends Screen {
     @Override
     public boolean keyPressed(KeyEvent event) {
         if (listening != null) {
-            listening.setKey(event.key() == GLFW.GLFW_KEY_ESCAPE ? InputConstants.UNKNOWN : InputConstants.getKey(event));
+            listening.setKey(event.key() == InputConstants.KEY_ESCAPE ? InputConstants.UNKNOWN : InputConstants.getKey(event));
             KeyMapping.resetMapping();
             minecraft.options.save();
             listening = null;
@@ -463,7 +462,7 @@ public class SpotifyConfigScreen extends Screen {
     @Override
     public void onClose() {
         cfg.save();
-        minecraft.gui.setScreen(parent);
+        Mc.setScreen(parent);
     }
 
     // ------------------------------------------------------------- widgets

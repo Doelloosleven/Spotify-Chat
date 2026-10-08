@@ -108,6 +108,6 @@ public class OverlayPositionScreen extends Screen {
     @Override
     public void onClose() {
         cfg.save();
-        minecraft.gui.setScreen(parent);
+        Mc.setScreen(parent);
     }
 }

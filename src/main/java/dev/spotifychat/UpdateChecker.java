@@ -64,6 +64,11 @@ public final class UpdateChecker {
         return failReason;
     }
 
+    private static String minecraftVersion() {
+        return FabricLoader.getInstance().getModContainer("minecraft")
+                .map(c -> c.getMetadata().getVersion().getFriendlyString()).orElse("?");
+    }
+
     public static String currentVersion() {
         return FabricLoader.getInstance().getModContainer(MOD_ID)
                 .map(c -> c.getMetadata().getVersion().getFriendlyString()).orElse("?");
@@ -96,16 +101,21 @@ public final class UpdateChecker {
                 || json.has("prerelease") && json.get("prerelease").getAsBoolean()) return;
         if (Version.parse(tag).compareTo(Version.parse(currentVersion())) <= 0) return; // up to date
 
+        // Releases have one jar per Minecraft version: spotify-chat-<mod>+<minecraft>.jar.
+        // Take the one for this Minecraft; a jar without "+..." (older releases) only as a fallback.
+        String mc = minecraftVersion();
         String jarName = "", jarUrl = "", sha = "";
         for (JsonElement el : json.getAsJsonArray("assets")) {
             JsonObject a = el.getAsJsonObject();
             String name = str(a, "name");
-            if (name.matches("spotify-chat-[\\w.+-]+\\.jar")) {
+            boolean forThisMc = name.endsWith("+" + mc + ".jar");
+            boolean legacy = name.matches("spotify-chat-[\\w.-]+\\.jar") && jarName.isEmpty();
+            if (name.startsWith("spotify-chat-") && (forThisMc || legacy)) {
                 jarName = name;
                 jarUrl = str(a, "browser_download_url");
                 String digest = str(a, "digest"); // "sha256:..." on newer GitHub releases
-                if (digest.startsWith("sha256:")) sha = digest.substring(7).toLowerCase(Locale.ROOT);
-                break;
+                sha = digest.startsWith("sha256:") ? digest.substring(7).toLowerCase(Locale.ROOT) : "";
+                if (forThisMc) break;
             }
         }
         latest = new Release(tag, str(json, "html_url"), jarName, jarUrl, sha);

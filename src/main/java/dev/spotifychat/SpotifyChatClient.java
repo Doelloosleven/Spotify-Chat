@@ -21,7 +21,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.Identifier;
 import net.minecraft.util.Util;
-import org.lwjgl.glfw.GLFW;
+import com.mojang.blaze3d.platform.InputConstants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -231,9 +231,9 @@ public class SpotifyChatClient implements ClientModInitializer {
         previousKey = registerKey("key.spotifychat.previous", category);
         overlayKey = registerKey("key.spotifychat.toggle_overlay", category);
         ircKey = KeyMappingHelper.registerKeyMapping(
-                new KeyMapping("key.spotifychat.irc", GLFW.GLFW_KEY_LEFT_BRACKET, category));
+                new KeyMapping("key.spotifychat.irc", InputConstants.KEY_LBRACKET, category));
         menuKey = KeyMappingHelper.registerKeyMapping(
-                new KeyMapping("key.spotifychat.menu", GLFW.GLFW_KEY_F4, category));
+                new KeyMapping("key.spotifychat.menu", InputConstants.KEY_F4, category));
 
         irc = new IrcClient(m -> runOnGame(() -> showIrc(m)), notice -> runOnGame(() -> ircInfo(notice)));
 
@@ -268,8 +268,8 @@ public class SpotifyChatClient implements ClientModInitializer {
             while (ircKey.consumeClick()) openIrcChat(mc);
             while (menuKey.consumeClick()) {
                 // F3+F4 is Minecraft's game mode switcher: leave that alone
-                if (!mc.options.keyDebugModifier.isDown() && mc.gui.screen() == null) {
-                    mc.gui.setScreen(new SpotifyConfigScreen(null));
+                if (!mc.options.keyDebugModifier.isDown() && Mc.screen() == null) {
+                    Mc.setScreen(new SpotifyConfigScreen(null));
                 }
             }
             if (config.ircEnabled && irc.status() == IrcClient.Status.OFF) {
@@ -279,7 +279,7 @@ public class SpotifyChatClient implements ClientModInitializer {
             if (mc.player != null) notifyUpdateOnce();
             if (openMenuNextTick) {
                 openMenuNextTick = false;
-                mc.gui.setScreen(new SpotifyConfigScreen(null));
+                Mc.setScreen(new SpotifyConfigScreen(null));
             }
         });
 
@@ -407,14 +407,14 @@ public class SpotifyChatClient implements ClientModInitializer {
 
     /** [ key: opens the chat; the message you send from it goes to IRC. T still opens normal chat. */
     private void openIrcChat(Minecraft mc) {
-        if (mc.gui.screen() != null) return;
+        if (Mc.screen() != null) return;
         if (!config.ircEnabled) {
-            mc.gui.hud.setOverlayMessage(Component.literal("IRC chat is off (turn it on in /spotify > IRC)")
-                    .withStyle(ChatFormatting.YELLOW), false);
+            Mc.actionBar(Component.literal("IRC chat is off (turn it on in /spotify > IRC)")
+                    .withStyle(ChatFormatting.YELLOW));
             return;
         }
         ircMode = true; // reset when this chat closes (see the ChatScreen remove listener)
-        mc.gui.openChatScreen(ChatComponent.ChatMethod.MESSAGE);
+        Mc.openChat();
     }
 
     /** With IRC on, the Jam link goes to IRC; the server only gets the note if that's switched on. */
@@ -445,7 +445,7 @@ public class SpotifyChatClient implements ClientModInitializer {
     }
 
     private static void ircInfo(String text) {
-        Minecraft.getInstance().gui.hud.getChat().addClientSystemMessage(Component.empty()
+        Mc.chat().addClientSystemMessage(Component.empty()
                 .append(Component.literal("[IRC] ").withStyle(ChatFormatting.DARK_GREEN))
                 .append(Component.literal(text).withStyle(ChatFormatting.GRAY)));
     }
@@ -475,7 +475,7 @@ public class SpotifyChatClient implements ClientModInitializer {
             pos = u.end();
         }
         line.append(Component.literal(m.text().substring(pos)).withStyle(ChatFormatting.WHITE));
-        Minecraft.getInstance().gui.hud.getChat().addClientSystemMessage(line);
+        Mc.chat().addClientSystemMessage(line);
     }
 
     private void setJamLink(String text) {
@@ -501,7 +501,7 @@ public class SpotifyChatClient implements ClientModInitializer {
     // ------------------------------------------------------- Keys & controls
 
     private static KeyMapping registerKey(String name, KeyMapping.Category category) {
-        return KeyMappingHelper.registerKeyMapping(new KeyMapping(name, GLFW.GLFW_KEY_UNKNOWN, category));
+        return KeyMappingHelper.registerKeyMapping(new KeyMapping(name, InputConstants.UNKNOWN.getValue(), category));
     }
 
     /** Spotify Chat's keys, in the order the menu shows them */
@@ -516,9 +516,9 @@ public class SpotifyChatClient implements ClientModInitializer {
 
     /** Play/pause, next or previous in the Spotify app, with a short confirmation above the hotbar. */
     void control(SpotifyControls.Action action) {
-        SpotifyControls.send(action).thenAccept(ok -> runOnGame(() -> Minecraft.getInstance().gui.hud
-                .setOverlayMessage(Component.literal(ok ? "♫ " + action.label : "Spotify isn't open")
-                        .withStyle(ok ? ChatFormatting.GREEN : ChatFormatting.YELLOW), false)));
+        SpotifyControls.send(action).thenAccept(ok -> runOnGame(() -> Mc.actionBar(
+                Component.literal(ok ? "♫ " + action.label : "Spotify isn't open")
+                        .withStyle(ok ? ChatFormatting.GREEN : ChatFormatting.YELLOW))));
     }
 
     // ---------------------------------------------------------------- Updates
@@ -547,7 +547,7 @@ public class SpotifyChatClient implements ClientModInitializer {
     }
 
     private static void link(String url, String text) {
-        Minecraft.getInstance().gui.hud.getChat().addClientSystemMessage(
+        Mc.chat().addClientSystemMessage(
                 Component.literal("[" + text + "]").withStyle(style -> style
                         .withColor(ChatFormatting.AQUA)
                         .withUnderlined(true)
@@ -559,8 +559,7 @@ public class SpotifyChatClient implements ClientModInitializer {
     private void toggleOverlay() {
         config.overlayEnabled = !config.overlayEnabled;
         config.save();
-        Minecraft.getInstance().gui.hud.setOverlayMessage(
-                Component.literal("Spotify overlay " + (config.overlayEnabled ? "on" : "off")), false);
+        Mc.actionBar(Component.literal("Spotify overlay " + (config.overlayEnabled ? "on" : "off")));
     }
 
     /** Every half second: what the overlay should show. Never waits for the network. */
@@ -840,13 +839,31 @@ public class SpotifyChatClient implements ClientModInitializer {
     // -------------------------------------------------------------- helpers
 
     /**
+     * Opens a link in the browser. Minecraft moved this between versions
+     * (26.3+: Blaze3D.openUri, before: Util.getPlatform().openUri), so the one that exists is used.
+     */
+    private static void openUri(URI uri) {
+        try {
+            Class.forName("com.mojang.blaze3d.Blaze3D").getMethod("openUri", URI.class).invoke(null, uri);
+            return;
+        } catch (ReflectiveOperationException ignored) {
+        }
+        try {
+            Object os = Util.getPlatform();
+            os.getClass().getMethod("openUri", URI.class).invoke(os, uri);
+        } catch (ReflectiveOperationException e) {
+            LOGGER.warn("Could not open {}", uri, e);
+        }
+    }
+
+    /**
      * Opens the URL in the default browser and also posts a clickable link, since
      * Minecraft's openUri only logs failures and never tells us the browser didn't open.
      */
     private static void openInBrowser(String url, String linkText) {
         LOGGER.info("Opening {}", url);
-        Util.getPlatform().openUri(url);
-        Minecraft.getInstance().gui.hud.getChat().addClientSystemMessage(
+        openUri(URI.create(url));
+        Mc.chat().addClientSystemMessage(
                 Component.literal("[" + linkText + "]").withStyle(style -> style
                         .withColor(ChatFormatting.AQUA)
                         .withUnderlined(true)
@@ -856,7 +873,7 @@ public class SpotifyChatClient implements ClientModInitializer {
     /** Shows a message only to you. */
     static void info(String text, ChatFormatting color) {
         Minecraft mc = Minecraft.getInstance();
-        mc.gui.hud.getChat().addClientSystemMessage(Component.literal(text).withStyle(color));
+        Mc.chat().addClientSystemMessage(Component.literal(text).withStyle(color));
     }
 
     private static void runOnGame(Runnable r) {

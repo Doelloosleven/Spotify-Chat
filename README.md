@@ -1,4 +1,4 @@
-# Spotify Chat (Fabric, Minecraft 26.2)
+# Spotify Chat (Fabric, Minecraft 26.1.2 / 26.2 / 26.3)
 
 Type `!spotify` in chat and the mod posts what you're listening to:
 
@@ -8,8 +8,8 @@ No login or Spotify developer setup needed: the song is read straight from the *
 
 ## Install
 
-1. Install **Fabric Loader** for 26.2 and put **Fabric API** for 26.2 in `.minecraft/mods`.
-2. Download `spotify-chat-<version>.jar` from [Releases](../../releases) and put it in `.minecraft/mods`.
+1. Install **Fabric Loader** for your Minecraft version and put **Fabric API** for that version in `.minecraft/mods`.
+2. Download the jar for your Minecraft version from [Releases](../../releases): `spotify-chat-<version>+26.1.2.jar`, `+26.2.jar` or `+26.3.jar`, and put it in `.minecraft/mods`.
 3. Open the Spotify app, play a song, type `!spotify`.
 
 ## Commands
@@ -115,7 +115,13 @@ The login is stored in `.minecraft/config/spotifychat.json`; don't share that fi
 
 ## Building
 
-Needs **JDK 25**. Run `gradlew.bat build`; the jar ends up in `build/libs/`.
+Needs **JDK 25**. The same code builds for every supported Minecraft version (things Minecraft moved between versions go through `Mc.java`). Jars end up in `build/libs/`:
+
+```
+gradlew build                                                                                   # 26.2 (default)
+gradlew build -Pminecraft_version=26.1.2 -Pfabric_version=0.155.3+26.1.2 -Pminecraft_dep=~26.1.2
+gradlew build -Pminecraft_version=26.3 -Pfabric_version=0.162.0+26.3 -Pminecraft_dep=~26.3
+```
 
 ## Troubleshooting
 

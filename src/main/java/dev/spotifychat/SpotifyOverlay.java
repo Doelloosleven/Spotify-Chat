@@ -30,7 +30,7 @@ public class SpotifyOverlay implements HudElement {
         Minecraft mc = Minecraft.getInstance();
         SpotifyChatClient client = SpotifyChatClient.get();
         ModConfig cfg = client.config();
-        if (!cfg.overlayEnabled || mc.gui.screen() instanceof OverlayPositionScreen) return; // the editor draws its own
+        if (!cfg.overlayEnabled || Mc.screen() instanceof OverlayPositionScreen) return; // the editor draws its own
         SpotifyClient.Track t = client.overlayTrack();
         if (t == null || !visible(t, cfg, client)) return;
         drawAtConfiguredSpot(g, mc.font, t, cfg, g.guiWidth(), g.guiHeight());
