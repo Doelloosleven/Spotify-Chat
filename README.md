@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/banner.png" alt="Spotify Chat"></p>
+
 # Spotify Chat (Fabric, Minecraft 26.1.2 / 26.2 / 26.3)
 
 Type `!spotify` in chat and the mod posts what you're listening to:
