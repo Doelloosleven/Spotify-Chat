@@ -488,13 +488,12 @@ public class SpotifyChatClient implements ClientModInitializer {
 
     private static final Pattern URL = Pattern.compile("https?://\\S+", Pattern.CASE_INSENSITIVE);
 
-    /** "[IRC] Nick: message", with links clickable (Minecraft asks before opening them) */
+    /** "[IRC] Nick: message" with every name in pink, and links clickable (Minecraft asks before opening them) */
     private void showIrc(IrcClient.Message m) {
-        boolean me = m.nick().equalsIgnoreCase(irc.nick());
         MutableComponent line = Component.empty()
                 .append(Component.literal("[IRC] ").withStyle(ChatFormatting.DARK_GREEN))
                 .append(Component.literal(m.action() ? "* " + m.nick() + " " : m.nick())
-                        .withStyle(me ? ChatFormatting.GREEN : ChatFormatting.AQUA));
+                        .withStyle(ChatFormatting.LIGHT_PURPLE));
         if (!m.action()) line.append(Component.literal(": ").withStyle(ChatFormatting.GRAY));
         Matcher u = URL.matcher(m.text());
         int pos = 0;
