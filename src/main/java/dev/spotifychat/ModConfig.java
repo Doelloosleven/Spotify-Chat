@@ -71,8 +71,8 @@ public class ModConfig {
     // ---- Updates
     /** Chat message when a newer version is on GitHub */
     public boolean updateNotify = true;
-    /** Download new versions automatically; they're installed when Minecraft closes. Only if the player turns it on. */
-    public boolean autoUpdate = false;
+    /** Download new versions automatically (only signed releases); they're installed when Minecraft closes */
+    public boolean autoUpdate = true;
 
     // ---- Overlay
     public boolean overlayEnabled = true;
@@ -105,21 +105,20 @@ public class ModConfig {
     public int keyDefaultsVersion = 0;
     /** Which round of changed defaults this config already got (see applyNewDefaults) */
     public int defaultsVersion = 0;
-    private static final int DEFAULTS_VERSION = 2;
+    private static final int DEFAULTS_VERSION = 1;
 
     /**
      * Settings files store every option, so a changed default never reaches players who already had the mod.
-     * Runs once for settings files from before round 2. Round 1 (1.2.1) switched auto-update on for everyone
-     * without asking; round 2 switches it off again, since players who chose it can't be told apart from
-     * the rest. Returns true if auto-update was on, so the player can be told where to turn it back on.
+     * Once per round: 1 (1.2.1) = auto-update on for everyone. Returns true if auto-update was switched on,
+     * so the player can be told (they can turn it off again).
      */
     boolean applyNewDefaults() {
         if (defaultsVersion >= DEFAULTS_VERSION) return false;
-        boolean switchedOff = autoUpdate;
-        autoUpdate = false;
+        boolean switchedOn = !autoUpdate;
+        autoUpdate = true;
         defaultsVersion = DEFAULTS_VERSION;
         save();
-        return switchedOff;
+        return switchedOn;
     }
 
     // ---- Web API login (optional)

@@ -174,7 +174,7 @@ public class SpotifyOverlay implements HudElement {
         List<String> lines = lines(t, cfg);
         int y = (h - (lines.size() * 10 - 2)) / 2;
         for (int i = 0; i < lines.size(); i++) {
-            String text = fit(font, lines.get(i), i == 0 ? MAX_TEXT - 6 : MAX_TEXT);
+            String text = i == 0 ? fitBold(font, lines.get(i), MAX_TEXT) : fit(font, lines.get(i), MAX_TEXT);
             Component c = i == 0 ? Component.literal(text).withStyle(ChatFormatting.BOLD) : Component.literal(text);
             int color = i == 0 ? WHITE : i == 1 ? colors.text()
                     : !t.playing() ? colors.accent() : CoverColors.mix(colors.text(), DARK_GRAY, 0.5f);
