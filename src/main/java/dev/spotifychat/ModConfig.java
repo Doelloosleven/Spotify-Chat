@@ -71,8 +71,8 @@ public class ModConfig {
     // ---- Updates
     /** Chat message when a newer version is on GitHub */
     public boolean updateNotify = true;
-    /** Download new versions automatically; they're installed when Minecraft closes */
-    public boolean autoUpdate = true;
+    /** Download new versions automatically; they're installed when Minecraft closes. Only if the player turns it on. */
+    public boolean autoUpdate = false;
 
     // ---- Overlay
     public boolean overlayEnabled = true;
@@ -105,27 +105,31 @@ public class ModConfig {
     public int keyDefaultsVersion = 0;
     /** Which round of changed defaults this config already got (see applyNewDefaults) */
     public int defaultsVersion = 0;
-    private static final int DEFAULTS_VERSION = 1;
+    private static final int DEFAULTS_VERSION = 2;
 
     /**
      * Settings files store every option, so a changed default never reaches players who already had the mod.
-     * Once per round: 1 (1.2.1) = auto-update on for everyone. Returns true if auto-update was switched on,
-     * so the player can be told (they can turn it off again).
+     * Runs once for settings files from before round 2. Round 1 (1.2.1) switched auto-update on for everyone
+     * without asking; round 2 switches it off again, since players who chose it can't be told apart from
+     * the rest. Returns true if auto-update was on, so the player can be told where to turn it back on.
      */
     boolean applyNewDefaults() {
         if (defaultsVersion >= DEFAULTS_VERSION) return false;
-        boolean switchedOn = !autoUpdate;
-        autoUpdate = true;
+        boolean switchedOff = autoUpdate;
+        autoUpdate = false;
         defaultsVersion = DEFAULTS_VERSION;
         save();
-        return switchedOn;
+        return switchedOff;
     }
 
     // ---- Web API login (optional)
     /** Client ID from your app at developer.spotify.com/dashboard */
     public String clientId = "";
-    /** Filled in automatically after "/spotify login". Keep this file private. */
-    public String refreshToken = "";
+    /**
+     * Only read from settings files of older versions, so SpotifyClient can move the login to
+     * spotifychat-secrets.json. Null is left out when saving.
+     */
+    public String refreshToken = null;
 
     public static ModConfig load() {
         try {
@@ -140,6 +144,7 @@ public class ModConfig {
             SpotifyChatClient.LOGGER.warn("Could not read {}, using defaults", PATH, e);
         }
         ModConfig cfg = new ModConfig();
+        cfg.defaultsVersion = DEFAULTS_VERSION; // a new player already has the current defaults
         cfg.save();
         return cfg;
     }

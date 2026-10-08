@@ -6,15 +6,20 @@ import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.resources.Identifier;
 
 import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.ImageInputStream;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Iterator;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -27,6 +32,9 @@ public final class CoverTextures {
 
     /** Covers are scaled down to this; the overlay draws them at 32 GUI pixels */
     private static final int SIZE = 96;
+    /** Real covers are well under 1 MB and 1000 px; anything bigger is refused before it can eat memory */
+    static final int MAX_BYTES = 2 * 1024 * 1024;
+    static final int MAX_SIDE = 4096;
     private static final HttpClient HTTP = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .followRedirects(HttpClient.Redirect.NORMAL)
@@ -73,9 +81,14 @@ public final class CoverTextures {
     private static Pixels download(String url) {
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(8)).GET().build();
-            HttpResponse<byte[]> res = HTTP.send(req, HttpResponse.BodyHandlers.ofByteArray());
-            if (res.statusCode() != 200) return null;
-            BufferedImage src = ImageIO.read(new ByteArrayInputStream(res.body()));
+            HttpResponse<InputStream> res = HTTP.send(req, HttpResponse.BodyHandlers.ofInputStream());
+            byte[] bytes;
+            try (InputStream in = res.body()) {
+                if (res.statusCode() != 200) return null;
+                bytes = in.readNBytes(MAX_BYTES + 1); // never more than this in memory
+            }
+            if (bytes.length > MAX_BYTES) return null;
+            BufferedImage src = decode(bytes);
             if (src == null) return null;
 
             BufferedImage scaled = new BufferedImage(SIZE, SIZE, BufferedImage.TYPE_INT_ARGB);
@@ -89,6 +102,26 @@ public final class CoverTextures {
         } catch (Exception e) {
             SpotifyChatClient.LOGGER.debug("Could not load cover {}", url, e);
             return null;
+        }
+    }
+
+    /**
+     * Reads the image size from the file's header first, so a small file claiming a huge picture is never
+     * decoded. Null if it isn't an image or is bigger than MAX_SIDE on a side.
+     */
+    static BufferedImage decode(byte[] bytes) throws IOException {
+        try (ImageInputStream iis = ImageIO.createImageInputStream(new ByteArrayInputStream(bytes))) {
+            if (iis == null) return null;
+            Iterator<ImageReader> readers = ImageIO.getImageReaders(iis);
+            if (!readers.hasNext()) return null;
+            ImageReader reader = readers.next();
+            try {
+                reader.setInput(iis, true, true);
+                if (reader.getWidth(0) > MAX_SIDE || reader.getHeight(0) > MAX_SIDE) return null;
+                return reader.read(0);
+            } finally {
+                reader.dispose();
+            }
         }
     }
 

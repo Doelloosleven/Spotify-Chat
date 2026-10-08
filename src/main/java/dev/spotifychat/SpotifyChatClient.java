@@ -113,7 +113,7 @@ public class SpotifyChatClient implements ClientModInitializer {
     /** True while a chat opened with the IRC key ([) is open: what you send from it goes to IRC */
     private volatile boolean ircMode;
     private boolean updateNotified = false;
-    /** Auto-update was just switched on by the new default: say so once, after joining a world */
+    /** Auto-update was just switched off by the new default: say so once, after joining a world */
     private boolean autoUpdateNotice = false;
 
     // Overlay
@@ -474,8 +474,10 @@ public class SpotifyChatClient implements ClientModInitializer {
                     : "IRC chat is off. Turn it on in /spotify > IRC.");
             return;
         }
-        if (irc.send(text)) showIrc(new IrcClient.Message(irc.nick(), text, false));
-        else ircInfo("Couldn't send, reconnecting...");
+        if (IrcClient.outgoing(text).isBlank()) return;
+        // Once the server accepts it, the IRC client shows it in chat exactly as it was sent (cleaned and cut
+        // to fit), not as typed
+        if (irc.send(text) == null) ircInfo("Couldn't send, reconnecting...");
     }
 
     private static void ircInfo(String text) {
@@ -592,9 +594,8 @@ public class SpotifyChatClient implements ClientModInitializer {
     private void notifyUpdateOnce() {
         if (autoUpdateNotice) {
             autoUpdateNotice = false;
-            info("♫ Spotify Chat now keeps itself up to date: new versions are installed when you close "
-                    + "Minecraft. Don't want that? Turn off Auto-update in /spotify > Keys & Updates.",
-                    ChatFormatting.GREEN);
+            info("♫ Spotify Chat auto-update is now off, so new versions aren't installed by themselves. "
+                    + "Want it back? Turn on Auto-update in /spotify > Keys & Updates.", ChatFormatting.YELLOW);
         }
         UpdateChecker.State state = UpdateChecker.state();
         if (updateNotified || state == UpdateChecker.State.NONE) return;
@@ -682,8 +683,8 @@ public class SpotifyChatClient implements ClientModInitializer {
 
     private void setClientId(String id) {
         config.clientId = id.trim();
-        config.refreshToken = "";
         config.save();
+        spotify.logout(); // the old login belongs to the old Client ID
         info("Client ID saved. Now type /spotify login", ChatFormatting.GREEN);
     }
 
@@ -718,8 +719,7 @@ public class SpotifyChatClient implements ClientModInitializer {
     }
 
     public void logout() {
-        config.refreshToken = "";
-        config.save();
+        spotify.logout();
         info("Logged out of the Spotify Web API. The desktop app is still used.", ChatFormatting.GREEN);
     }
 
@@ -889,8 +889,18 @@ public class SpotifyChatClient implements ClientModInitializer {
         if (p.fromShare()) busy = false;
         if (mc.player == null || mc.getConnection() == null) return;
         LOGGER.info("Sending: {}", p.channel() == null ? p.text() : "/" + p.channel() + " " + p.text());
-        if (p.channel() == null) mc.getConnection().sendChat(p.text());
+        if (p.channel() == null) mc.getConnection().sendChat(openChatText(p.text()));
         else mc.getConnection().sendCommand(p.channel() + " " + p.text());
+    }
+
+    /**
+     * With an empty "text before the song", a song title can start with "/", and some servers and proxies
+     * run chat that starts with "/" as a command. One space in front keeps it a chat message.
+     */
+    static String openChatText(String text) {
+        if (!text.startsWith("/")) return text;
+        String spaced = " " + text;
+        return spaced.length() > MAX_CHAT_LENGTH ? spaced.substring(0, MAX_CHAT_LENGTH - 3) + "..." : spaced;
     }
 
     /** Runs off the game thread. */

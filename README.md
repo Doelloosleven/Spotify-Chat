@@ -81,7 +81,8 @@ On Windows the command goes straight to Spotify's window, so it never pauses ano
 ## Updates
 
 - **Update notifications** (on by default): a chat message with a download link when a new version is on the [GitHub releases page](https://github.com/Doelloosleven/Spotify-Chat/releases).
-- **Auto-update** (on by default since 1.2.1; turn it off under Keys & Updates): downloads the new version for you and installs it when you close Minecraft. Players who had the mod before 1.2.1 get it switched on once, with a chat message saying how to turn it off. The download only comes from the official GitHub releases, is checked against GitHub's SHA-256 checksum, and must be Spotify Chat for your Minecraft version. Windows keeps a running mod locked, so a small hidden PowerShell step waits for Minecraft to close and then swaps the files. If the swap can't finish, the old version is put back and the next start tries again.
+- **Auto-update** (off by default; turn it on under Keys & Updates): downloads the new version for you and installs it when you close Minecraft. Only jars signed with the Spotify Chat release key are installed: each release jar comes with a `.sig` file, and if it's missing or doesn't match, nothing is installed and you get the normal update message instead. The download must start at github.com, GitHub's SHA-256 checksum is checked as well, and the jar must be Spotify Chat for your Minecraft version. Windows keeps a running mod locked, so a small hidden PowerShell step waits for Minecraft to close and then swaps the files. If the swap can't finish, the old version is put back and the next start tries again.
+- 1.2.1 switched auto-update on for everyone without asking. The version after it switches it off once for players who had it on, with a chat message saying where to turn it back on.
 
 ## Settings menu
 
@@ -98,7 +99,7 @@ Example with everything on:
 
 The desktop app's window title only has the song and the main artist, so the featured artists, album and album cover are looked up in Deezer's free public music search (no account needed) as soon as a new song starts. If the song can't be found, they're left out. With the phone/web login, Spotify's own info is used.
 
-Everything is saved to `config/spotifychat.json`.
+Everything is saved to `config/spotifychat.json` (the optional Spotify login has its own file, see below).
 
 ## How the song is found
 
@@ -118,7 +119,7 @@ The desktop app method only sees music playing on this PC. To also share what pl
 2. Copy the **Client ID** from the app's Settings.
 3. In game: `/spotify id <Client ID>` then `/spotify login`.
 
-The login is stored in `.minecraft/config/spotifychat.json`; don't share that file. The desktop app is always checked first; the Web API is used when nothing plays there.
+The login is stored in `.minecraft/config/spotifychat-secrets.json`. **Never share that file**, for example in a bug report. `spotifychat.json` holds no login (older versions kept it there; it's moved out on the first start). The separate file only protects against sharing it by accident: any program running on your PC as you can still read it. The desktop app is always checked first; the Web API is used when nothing plays there.
 
 ## Building
 
@@ -129,6 +130,10 @@ gradlew build                                                                   
 gradlew build -Pminecraft_version=26.1.2 -Pfabric_version=0.155.3+26.1.2 -Pminecraft_dep=~26.1.2
 gradlew build -Pminecraft_version=26.3 -Pfabric_version=0.162.0+26.3 -Pminecraft_dep=~26.3
 ```
+
+`gradlew build` also runs the unit tests in `src/test`.
+
+**Releases** must be signed, or auto-update won't install them: `tools/sign_release.py` writes a `.sig` next to each jar with the Ed25519 private key whose path is in `SPOTIFY_CHAT_SIGNING_KEY`. Upload every `.sig` together with its jar. The matching public key goes in `UpdateChecker.RELEASE_PUBLIC_KEY` (`python tools/sign_release.py --public-key` prints it). Never commit the private key.
 
 ## Troubleshooting
 

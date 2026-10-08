@@ -1,13 +1,21 @@
 package dev.spotifychat;
 
+import javax.net.ssl.SSLParameters;
+import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
+import java.io.BufferedInputStream;
+import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.Deque;
+import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 /**
@@ -21,10 +29,26 @@ public final class IrcClient {
     /** The one channel every Spotify Chat user joins */
     public static final String CHANNEL = "#spotifychat";
 
+    /** IRC lines are at most 512 bytes; this is far more than any real one, and nothing longer is kept */
+    static final int MAX_LINE_BYTES = 2048;
+    /** What we send must fit in 512 bytes together with "PRIVMSG #spotifychat :" and the server's prefix */
+    static final int MAX_TEXT_BYTES = 400;
+    private static final long REJOIN_DELAY_MS = 10_000;
+    private static final long REJOIN_MIN_GAP_MS = 60_000;
+
+    private static final ScheduledExecutorService TIMER = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "SpotifyChat-IRC-rejoin");
+        t.setDaemon(true);
+        return t;
+    });
+
     /** A chat line from the channel */
     public record Message(String nick, String text, boolean action) {}
 
     public enum Status { OFF, CONNECTING, CONNECTED }
+
+    /** A sent message waiting for the server to answer the PING sent right after it */
+    private record Pending(String token, String text) {}
 
     private final Consumer<Message> onMessage;
     private final Consumer<String> onNotice;
@@ -37,6 +61,9 @@ public final class IrcClient {
     private final String channel = CHANNEL;
     private volatile int online;
     private volatile boolean running;
+    private final Deque<Pending> unconfirmed = new ConcurrentLinkedDeque<>();
+    private final AtomicLong tokens = new AtomicLong();
+    private volatile long lastRejoinAt;
 
     /** onMessage / onNotice are called on the IRC thread */
     public IrcClient(Consumer<Message> onMessage, Consumer<String> onNotice) {
@@ -90,23 +117,48 @@ public final class IrcClient {
         online = 0;
     }
 
-    /** Sends a line to the channel. Returns false when not connected. */
-    public boolean send(String text) {
+    /**
+     * Sends a line to the channel. Returns the text exactly as it was sent (see outgoing), or null when not
+     * connected. It's shown in chat (onMessage) only once the server has accepted it.
+     */
+    public String send(String text) {
         Writer w = out;
-        if (status != Status.CONNECTED || w == null) return false;
-        String clean = clean(text);
-        if (clean.isBlank()) return false;
-        if (clean.length() > 350) clean = clean.substring(0, 350);
+        if (status != Status.CONNECTED || w == null) return null;
+        String line = outgoing(text);
+        if (line.isBlank()) return null;
+        Pending p = new Pending("sc" + tokens.incrementAndGet(), line);
         try {
             synchronized (this) {
-                w.write("PRIVMSG " + channel + " :" + clean + "\r\n");
+                unconfirmed.add(p);
+                w.write("PRIVMSG " + channel + " :" + line + "\r\n");
+                // The server answers in order, so an error about this message arrives before this PONG
+                w.write("PING :" + p.token() + "\r\n");
                 w.flush();
             }
-            return true;
+            return line;
         } catch (Exception e) {
+            unconfirmed.remove(p);
             closeSocket();
-            return false;
+            return null;
         }
+    }
+
+    /** What send() sends for this text: no line breaks or control characters, at most 400 UTF-8 bytes. */
+    public static String outgoing(String text) {
+        return cutToBytes(clean(text), MAX_TEXT_BYTES);
+    }
+
+    /** Longest start of s that's at most maxBytes in UTF-8, never cutting a character in half */
+    static String cutToBytes(String s, int maxBytes) {
+        int bytes = 0, i = 0;
+        while (i < s.length()) {
+            int cp = s.codePointAt(i);
+            int len = cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
+            if (bytes + len > maxBytes) break;
+            bytes += len;
+            i += Character.charCount(cp);
+        }
+        return s.substring(0, i);
     }
 
     private void loop(String baseNick) {
@@ -133,13 +185,33 @@ public final class IrcClient {
         status = Status.OFF;
     }
 
+    /**
+     * TLS socket that also checks the certificate is for this host name. Without that, any certificate a
+     * trusted authority signed for any name would be accepted.
+     */
+    static SSLSocket openTls(String host, int port) throws IOException {
+        SSLSocket s = (SSLSocket) SSLSocketFactory.getDefault().createSocket(host, port);
+        try {
+            SSLParameters params = s.getSSLParameters();
+            params.setEndpointIdentificationAlgorithm("HTTPS");
+            s.setSSLParameters(params);
+            s.setSoTimeout(30_000);
+            s.startHandshake();
+            return s;
+        } catch (IOException e) {
+            s.close();
+            throw e;
+        }
+    }
+
     private void session(String baseNick) throws Exception {
         status = Status.CONNECTING;
         online = 0;
-        Socket s = SSLSocketFactory.getDefault().createSocket(SERVER, PORT);
+        unconfirmed.clear();
+        Socket s = openTls(SERVER, PORT);
         s.setSoTimeout(300_000); // the server pings every few minutes
         socket = s;
-        BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
+        BoundedLineReader in = new BoundedLineReader(new BufferedInputStream(s.getInputStream()), MAX_LINE_BYTES);
         Writer w = new OutputStreamWriter(s.getOutputStream(), StandardCharsets.UTF_8);
         out = w;
 
@@ -194,6 +266,11 @@ public final class IrcClient {
                 case "PART", "QUIT" -> {
                     if (status == Status.CONNECTED) online = Math.max(1, online - 1);
                 }
+                case "KICK" -> {
+                    if (parts.length > 2 && parts[1].equalsIgnoreCase(channel) && parts[2].equalsIgnoreCase(nick)) {
+                        kicked(from, stripFormatting(trailing), w);
+                    }
+                }
                 case "NICK" -> {
                     if (from.equalsIgnoreCase(nick)) nick = trailing;
                 }
@@ -204,6 +281,20 @@ public final class IrcClient {
                         if (!text.startsWith("\u0001")) onMessage.accept(new Message(from, stripFormatting(text), action));
                     }
                 }
+                case "PONG" -> { // the server got the message sent before this PING: show it
+                    String token = !trailing.isEmpty() ? trailing : parts.length > 2 ? parts[2] : "";
+                    for (Pending p : unconfirmed) {
+                        if (p.token().equals(token) && unconfirmed.remove(p)) {
+                            onMessage.accept(new Message(nick, p.text(), false));
+                            break;
+                        }
+                    }
+                }
+                case "404", "442" -> { // cannot send to channel / not on channel: the oldest unanswered message failed
+                    Pending failed = unconfirmed.poll();
+                    onNotice.accept("Not delivered" + (failed == null ? "" : ": \"" + failed.text() + "\"")
+                            + " (" + stripFormatting(trailing) + ")");
+                }
                 case "474", "473", "475", "471" -> onNotice.accept("Can't join " + channel + ": " + trailing);
                 case "ERROR" -> throw new IllegalStateException(trailing);
                 default -> {
@@ -211,6 +302,25 @@ public final class IrcClient {
             }
         }
         throw new IllegalStateException("connection closed");
+    }
+
+    /** Kicked from the channel: say why, then rejoin after 10 seconds, at most once a minute. */
+    private void kicked(String by, String reason, Writer session) {
+        status = Status.CONNECTING; // no longer in the channel, so nothing can be sent
+        online = 0;
+        long now = System.currentTimeMillis();
+        long at = Math.max(now + REJOIN_DELAY_MS, lastRejoinAt + REJOIN_MIN_GAP_MS);
+        lastRejoinAt = at;
+        long seconds = (at - now + 999) / 1000;
+        onNotice.accept("Kicked from " + channel + " by " + by + (reason.isBlank() ? "" : ": " + reason)
+                + ". Rejoining in " + seconds + " s.");
+        TIMER.schedule(() -> {
+            if (!running || out != session) return; // stopped or reconnected meanwhile
+            try {
+                raw("JOIN " + channel);
+            } catch (Exception ignored) {
+            }
+        }, at - now, TimeUnit.MILLISECONDS);
     }
 
     private synchronized void raw(String line) throws Exception {

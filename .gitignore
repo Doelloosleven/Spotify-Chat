@@ -4,3 +4,11 @@ run/
 .idea/
 *.iml
 out/
+logs/
+
+# Release signing keys (tools/sign_release.py) never go in the repo
+*.pem
+*.key
+*.p8
+*.der
+signing/
