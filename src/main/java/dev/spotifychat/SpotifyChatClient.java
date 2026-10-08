@@ -113,7 +113,7 @@ public class SpotifyChatClient implements ClientModInitializer {
     /** True while a chat opened with the IRC key ([) is open: what you send from it goes to IRC */
     private volatile boolean ircMode;
     private boolean updateNotified = false;
-    /** Auto-update was just switched off by the new default: say so once, after joining a world */
+    /** Auto-update was just switched on by the new default: say so once, after joining a world */
     private boolean autoUpdateNotice = false;
 
     // Overlay
@@ -593,8 +593,9 @@ public class SpotifyChatClient implements ClientModInitializer {
     private void notifyUpdateOnce() {
         if (autoUpdateNotice) {
             autoUpdateNotice = false;
-            info("♫ Spotify Chat auto-update is now off, so new versions aren't installed by themselves. "
-                    + "Want it back? Turn on Auto-update in /spotify > Keys & Updates.", ChatFormatting.YELLOW);
+            info("♫ Spotify Chat now keeps itself up to date: new versions are installed when you close "
+                    + "Minecraft. Don't want that? Turn off Auto-update in /spotify > Keys & Updates.",
+                    ChatFormatting.GREEN);
         }
         UpdateChecker.State state = UpdateChecker.state();
         if (updateNotified || state == UpdateChecker.State.NONE) return;

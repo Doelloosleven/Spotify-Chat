@@ -81,8 +81,8 @@ On Windows the command goes straight to Spotify's window, so it never pauses ano
 ## Updates
 
 - **Update notifications** (on by default): a chat message with a download link when a new version is on the [GitHub releases page](https://github.com/Doelloosleven/Spotify-Chat/releases).
-- **Auto-update** (off by default; turn it on under Keys & Updates): downloads the new version for you and installs it when you close Minecraft. Only jars signed with the Spotify Chat release key are installed: each release jar comes with a `.sig` file, and if it's missing or doesn't match, nothing is installed and you get the normal update message instead. The download must start at github.com, GitHub's SHA-256 checksum is checked as well, and the jar must be Spotify Chat for your Minecraft version. Windows keeps a running mod locked, so a small hidden PowerShell step waits for Minecraft to close and then swaps the files. If the swap can't finish, the old version is put back and the next start tries again.
-- 1.2.1 switched auto-update on for everyone without asking. The version after it switches it off once for players who had it on, with a chat message saying where to turn it back on.
+- **Auto-update** (on by default; turn it off under Keys & Updates): downloads the new version for you and installs it when you close Minecraft. Only jars signed with the Spotify Chat release key are installed: each release jar comes with a `.sig` file, and if it's missing or doesn't match, nothing is installed and you get the normal update message instead. The download must start at github.com, GitHub's SHA-256 checksum is checked as well, and the jar must be Spotify Chat for your Minecraft version. Windows keeps a running mod locked, so a small hidden PowerShell step waits for Minecraft to close and then swaps the files. If the swap can't finish, the old version is put back and the next start tries again.
+- Players who had the mod before 1.2.1 get auto-update switched on once, with a chat message saying how to turn it off. After that the mod never changes it: if you turn it off, it stays off.
 
 ## Settings menu
 

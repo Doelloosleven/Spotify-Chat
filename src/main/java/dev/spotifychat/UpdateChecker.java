@@ -40,8 +40,8 @@ import java.util.zip.ZipFile;
 
 /**
  * Looks for a newer Spotify Chat on the GitHub releases page once per game start.
- * Notify: a chat message with a download link. Auto-update (off by default): downloads the new jar,
- * checks its Ed25519 signature and that it's really Spotify Chat for this Minecraft version, and swaps it
+ * Notify: a chat message with a download link. Auto-update (on by default, can be turned off): downloads the new
+ * jar, checks its Ed25519 signature and that it's really Spotify Chat for this Minecraft version, and swaps it
  * in when the game closes (Windows keeps the running jar locked, so a small hidden PowerShell step waits
  * for Minecraft to exit).
  */
