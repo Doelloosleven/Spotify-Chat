@@ -36,7 +36,7 @@ When a guild, party or co-op member types `!spotify`, your song gets sent back.
 
 ## Good to know
 
-- **IRC** is `#spotifychat` on Rizon and is linked to `#irc` on the [Spotify Chat Discord](https://discord.gg/kWa9kCnJ9U). Jam links go there too, because Hypixel punishes links in chat.
+- **IRC** is `#spotifychat` on Rizon and is linked to `#irc` on the [Spotify Chat Discord](https://discord.gg/v5GUAw9VkV). Jam links go there too, because Hypixel punishes links in chat.
 - **Guild IRC**: a private IRC for guilds that have one set up. Members are let in automatically (the bot checks your guild role and confirms your Minecraft account with Mojang), nobody else can join.
 - **Overlay** shows the song and album cover in the album's colors. Move it in the settings.
 - **Auto-update** is on by default and only installs signed releases. Turn it off under Keys & Updates.

@@ -12,6 +12,11 @@ Settings come from the environment (see spotify-chat-bridge.service):
   DISCORD_CHANNEL_ID        Discord channel for the open IRC
   GUILD_DISCORD_CHANNEL_ID  optional: Discord channel for the guild IRC (no guild IRC without it)
   GUILD_ROLES               Discord roles that count as guild members, comma separated
+  RELEASES_CHANNEL_ID       optional: new GitHub releases are posted here
+  NEW_PEOPLE_CHANNEL_ID     optional: a welcome card for everyone who joins the Spotify Chat server
+  NOW_PLAYING_CHANNEL_ID    optional: songs shared with !spotify in the open IRC, with album covers
+  MEMBER_ROLE_ID            optional: role every new member gets
+  MEMBER_COUNT_CHANNEL_ID   optional: channel renamed to "👥 Members: N"
   IRC_NICK                  optional, default SpotifyDiscord
 
 `bridge.py --list-channels` prints the text channels the bot can see, to find the channel id.
@@ -27,6 +32,7 @@ import secrets
 import ssl
 import sys
 import time
+from urllib.parse import quote
 
 import aiohttp
 import discord
@@ -47,6 +53,10 @@ AUTH_PREFIX = "SpotifyChat guild IRC:"
 HELLO_GAP = 20              # seconds between guild requests from one nick
 PROVE_TIMEOUT = 120
 RECHECK_EVERY = 300
+GITHUB_REPO = "Doelloosleven/Spotify-Chat"
+RELEASE_CHECK_EVERY = 900   # GitHub allows 60 requests an hour without a login
+JAR_NAME = re.compile(r"spotify-chat-[\w.]+\+([\w.]+)\.jar")
+NOW_PLAYING = re.compile(r"♫ Now playing: (.{1,300})")  # the mod's default song message
 
 OPEN, GUILD = "open", "guild"
 
@@ -94,6 +104,44 @@ async def has_joined(name: str, sid: str) -> dict | None:
     except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
         log.warning("Mojang check failed: %s", e)
         return None
+
+
+async def latest_release() -> dict | None:
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "spotify-chat-bridge"}
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as s:
+            async with s.get(url, headers=headers) as r:
+                if r.status != 200:
+                    return None
+                data = await r.json()
+                return data if isinstance(data, dict) and data.get("tag_name") else None
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
+        log.warning("GitHub check failed: %s", e)
+        return None
+
+
+def release_embed(release: dict) -> discord.Embed:
+    """The release as a card: what's new (without the download table) and a link per Minecraft version."""
+    lines = []
+    for line in (release.get("body") or "").splitlines():
+        if re.match(r"#+\s*Download", line, re.I):
+            break  # the table that follows doesn't work on Discord; the field below replaces it
+        heading = re.match(r"#+\s*(.+)", line)
+        if heading and not lines:
+            continue  # the title is already the embed title
+        lines.append(f"**{heading.group(1)}**" if heading else line)
+    embed = discord.Embed(title=release.get("name") or release["tag_name"], url=release.get("html_url"),
+                          description="\n".join(lines).strip()[:3500], color=SPOTIFY_GREEN)
+    downloads = []
+    for asset in release.get("assets", []):
+        m = JAR_NAME.fullmatch(asset.get("name", ""))
+        if m:
+            downloads.append(f"Minecraft {m.group(1)}: [{asset['name']}]({asset['browser_download_url']})")
+    if downloads:
+        embed.add_field(name="Download", value="\n".join(sorted(downloads)), inline=False)
+    embed.set_footer(text="Auto-update installs it when you close Minecraft")
+    return embed
 
 
 class Irc:
@@ -348,22 +396,137 @@ class Irc:
             await asyncio.sleep(SEND_GAP)
 
 
+async def deezer_cover(artist: str, song: str) -> str | None:
+    """Album cover for a song from Deezer's public search (the mod uses the same), or None."""
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as s:
+            async with s.get("https://api.deezer.com/search", params={"q": f"{artist} {song}", "limit": 1}) as r:
+                data = await r.json(content_type=None)
+        cover = data["data"][0]["album"]["cover_medium"]
+        return cover if isinstance(cover, str) and cover.startswith("https://") else None
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, KeyError, IndexError, TypeError):
+        return None
+
+
+def now_playing_embed(nick: str, track: str, cover: str | None) -> discord.Embed:
+    """"Song - Artist, Feat - Album" (the mod's default format) as a card with the cover."""
+    parts = track.removesuffix(" (paused)").split(" - ")
+    song, artists = parts[0], parts[1] if len(parts) > 1 else ""
+    album = " - ".join(parts[2:])
+    search = quote(f"{song} {artists.split(',')[0]}".strip())
+    embed = discord.Embed(title=song[:256], url=f"https://open.spotify.com/search/{search}", color=SPOTIFY_GREEN,
+                          description="\n".join(x for x in (f"by **{artists}**" if artists else "",
+                                                            f"on *{album}*" if album else "") if x)[:1000],
+                          timestamp=discord.utils.utcnow())
+    embed.set_author(name=f"{nick} is listening to")
+    if cover:
+        embed.set_thumbnail(url=cover)
+    embed.set_footer(text="Shared in game with !spotify")
+    return embed
+
+
 class Bridge(discord.Client):
-    def __init__(self, channels: dict[str, int], guild_roles: set[str]):
+    def __init__(self, channels: dict[str, int], guild_roles: set[str], extras: dict[str, int]):
         intents = discord.Intents.none()
         intents.guilds = True
         intents.guild_messages = True
         intents.message_content = True
-        intents.members = True  # to see who has a guild role
-        super().__init__(intents=intents, allowed_mentions=discord.AllowedMentions.none())
+        intents.members = True  # to see who has a guild role, and who joins
+        super().__init__(intents=intents, allowed_mentions=discord.AllowedMentions.none(),
+                         activity=discord.Activity(type=discord.ActivityType.listening, name="the in-game IRC"))
         self.channels = channels        # kind -> Discord channel id
         self.kinds = {cid: kind for kind, cid in channels.items()}
         self.guild_roles = {r.lower() for r in guild_roles}
+        self.releases_channel = extras.get("releases", 0)
+        self.new_people_channel = extras.get("new_people", 0)
+        self.now_playing_channel = extras.get("now_playing", 0)
+        self.member_role = extras.get("member_role", 0)
+        self.member_count_channel = extras.get("member_count", 0)
+        self.count_dirty = True
         self.irc = Irc(self.from_irc, self.is_member)
 
     async def setup_hook(self):
         self.irc_task = asyncio.create_task(self.irc.run())
         self.recheck_task = asyncio.create_task(self.recheck_loop())
+        if self.releases_channel:
+            self.release_task = asyncio.create_task(self.release_loop())
+        if self.member_count_channel:
+            self.count_task = asyncio.create_task(self.member_count_loop())
+
+    def home(self) -> discord.Guild | None:
+        """The Spotify Chat server: the one with the open IRC channel"""
+        channel = self.get_channel(self.channels.get(OPEN, 0))
+        return channel.guild if channel else None
+
+    async def on_member_join(self, member: discord.Member):
+        if member.guild != self.home() or member.bot:
+            return
+        self.count_dirty = True
+        role = member.guild.get_role(self.member_role)
+        try:
+            if role:
+                await member.add_roles(role, reason="New member")
+            channel = self.get_channel(self.new_people_channel)
+            if channel:
+                await channel.send(content=member.mention, embed=self.welcome_embed(member),
+                                   allowed_mentions=discord.AllowedMentions(users=[member]))
+        except discord.HTTPException as e:
+            log.warning("welcome failed: %s", e)
+
+    def welcome_embed(self, member: discord.Member) -> discord.Embed:
+        humans = sum(1 for m in member.guild.members if not m.bot)
+        irc = self.channels.get(OPEN, 0)
+        lines = [f"Hey {member.mention}, you're member **#{humans}**.", ""]
+        welcome = discord.utils.find(lambda c: c.name.endswith("welcome"), member.guild.text_channels)
+        if welcome:
+            lines.append(f"Get the mod in {welcome.mention}")
+        lines.append(f"Chat with players in game in <#{irc}>")
+        if self.now_playing_channel:
+            lines.append(f"See what everyone's listening to in <#{self.now_playing_channel}>")
+        embed = discord.Embed(title="Welcome to Spotify Chat", description="\n".join(lines), color=SPOTIFY_GREEN)
+        embed.set_thumbnail(url=member.display_avatar.url)
+        embed.set_footer(text="Type !spotify in Minecraft and everyone sees your song",
+                         icon_url=self.user.display_avatar.url)
+        return embed
+
+    async def member_count_loop(self):
+        """Keeps "👥 Members: N" up to date. Discord allows two renames per 10 minutes, so at most every 6."""
+        await self.wait_until_ready()
+        while True:
+            channel = self.get_channel(self.member_count_channel)
+            if self.count_dirty and channel:
+                self.count_dirty = False
+                name = f"👥 Members: {sum(1 for m in channel.guild.members if not m.bot)}"
+                if channel.name != name:
+                    try:
+                        await channel.edit(name=name, reason="Member count")
+                    except discord.HTTPException as e:
+                        log.warning("member count update failed: %s", e)
+            await asyncio.sleep(360)
+
+    async def release_loop(self):
+        """Posts each new GitHub release once. What's already posted is read back from the channel."""
+        await self.wait_until_ready()
+        while True:
+            try:
+                await self.post_new_release()
+            except discord.HTTPException as e:
+                log.warning("couldn't post the release: %s", e)
+            await asyncio.sleep(RELEASE_CHECK_EVERY)
+
+    async def post_new_release(self):
+        channel = self.get_channel(self.releases_channel)
+        release = await latest_release()
+        if channel is None or release is None:
+            return
+        url = release.get("html_url")
+        async for message in channel.history(limit=20):
+            if message.author == self.user and any(e.url == url for e in message.embeds):
+                return  # already posted
+        embed = release_embed(release)
+        embed.set_thumbnail(url=self.user.display_avatar.url)
+        await channel.send(embed=embed)
+        log.info("posted release %s", release["tag_name"])
 
     async def on_ready(self):
         for kind, cid in self.channels.items():
@@ -394,6 +557,8 @@ class Bridge(discord.Client):
 
     async def on_member_remove(self, member):
         self.irc.recheck()
+        if member.guild == self.home():
+            self.count_dirty = True
 
     async def recheck_loop(self):
         while True:
@@ -405,6 +570,7 @@ class Bridge(discord.Client):
         channel = self.get_channel(self.channels.get(kind, 0))
         if channel is None:
             return
+        song = NOW_PLAYING.fullmatch(text) if kind == OPEN and not action else None
         text = discord.utils.escape_markdown(text)
         embed = discord.Embed(description=(f"*{text}*" if action else text)[:4000],
                               color=SPOTIFY_GREEN, timestamp=discord.utils.utcnow())
@@ -413,6 +579,20 @@ class Bridge(discord.Client):
             await channel.send(embed=embed)
         except discord.HTTPException as e:
             log.warning("Discord send failed: %s", e)
+        if song and self.now_playing_channel:
+            await self.post_now_playing(nick, song.group(1))
+
+    async def post_now_playing(self, nick: str, track: str):
+        """A song shared with !spotify in the open IRC also goes to #now-playing, with its album cover."""
+        channel = self.get_channel(self.now_playing_channel)
+        if channel is None:
+            return
+        parts = track.split(" - ")
+        cover = await deezer_cover(parts[1].split(",")[0] if len(parts) > 1 else "", parts[0])
+        try:
+            await channel.send(embed=now_playing_embed(nick, track, cover))
+        except discord.HTTPException as e:
+            log.warning("now playing post failed: %s", e)
 
     async def on_message(self, message: discord.Message):
         kind = self.kinds.get(message.channel.id)
@@ -474,7 +654,14 @@ def main():
     if OPEN not in channels:
         sys.exit("DISCORD_CHANNEL_ID is not set")
     roles = {r.strip() for r in os.environ.get("GUILD_ROLES", "").split(",") if r.strip()}
-    Bridge(channels, roles).run(token, log_handler=None)
+    extras = {}
+    for key, var in (("releases", "RELEASES_CHANNEL_ID"), ("new_people", "NEW_PEOPLE_CHANNEL_ID"),
+                     ("now_playing", "NOW_PLAYING_CHANNEL_ID"), ("member_role", "MEMBER_ROLE_ID"),
+                     ("member_count", "MEMBER_COUNT_CHANNEL_ID")):
+        value = os.environ.get(var, "").strip()
+        if value.isdigit():
+            extras[key] = int(value)
+    Bridge(channels, roles, extras).run(token, log_handler=None)
 
 
 if __name__ == "__main__":

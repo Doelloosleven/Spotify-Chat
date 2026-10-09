@@ -1,6 +1,6 @@
 # Discord bridge
 
-Links the in-game IRC (`#spotifychat` on Rizon) to `#irc` on the [Spotify Chat Discord](https://discord.gg/kWa9kCnJ9U), and runs the private guild IRC. Runs on a small Linux server as a systemd service.
+Links the in-game IRC (`#spotifychat` on Rizon) to `#irc` on the [Spotify Chat Discord](https://discord.gg/v5GUAw9VkV), and runs the private guild IRC. Runs on a small Linux server as a systemd service.
 
 - `bridge.py`: the bot (Python 3.12, `discord.py`)
 - `spotify-chat-bridge.service`: systemd unit, reads `/etc/spotify-chat-bridge/bridge.env` and `token.env`
@@ -25,6 +25,11 @@ sudo install -m 644 spotify-chat-bridge.service /etc/systemd/system/
 DISCORD_CHANNEL_ID=<channel for the open IRC>
 GUILD_DISCORD_CHANNEL_ID=<channel for the guild IRC, optional>
 GUILD_ROLES=<Discord roles that count as guild members, comma separated>
+RELEASES_CHANNEL_ID=<channel where new GitHub releases are posted, optional>
+NEW_PEOPLE_CHANNEL_ID=<welcome card for everyone who joins, optional>
+NOW_PLAYING_CHANNEL_ID=<songs shared with !spotify in IRC, with album covers, optional>
+MEMBER_ROLE_ID=<role every new member gets, optional>
+MEMBER_COUNT_CHANNEL_ID=<channel renamed to "Members: N", optional>
 ```
 
 Then `sudo spotify-chat-bridge-token` (paste the token) and `sudo systemctl enable --now spotify-chat-bridge`. The bot needs the Message Content and Server Members intents.

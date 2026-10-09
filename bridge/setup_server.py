@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""One-time layout for the Spotify Chat Discord server: categories, channels, a role, an emoji and the
-welcome / rules posts. Run with DISCORD_TOKEN set, from the folder with avatar.png, emoji.png and banner.png.
-The bot needs Manage Channels, Manage Roles and Manage Expressions in that server."""
+"""One-time layout for a fresh Spotify Chat Discord server: categories, channels, roles, an emoji, the
+welcome / rules posts and an invite. Run with DISCORD_TOKEN set, from the folder with avatar.png, emoji.png
+(128x128) and banner.png. The bot needs Manage Server, Channels, Roles and Expressions in that server and the
+Server Members intent. It prints the ids that go into bridge.env."""
 import asyncio
 import os
 
@@ -53,7 +54,9 @@ def rules_embed() -> discord.Embed:
 
 
 async def main():
-    client = discord.Client(intents=discord.Intents.none())
+    intents = discord.Intents.none()
+    intents.members = True  # to give everyone already in the server the Listener role
+    client = discord.Client(intents=intents)
     async with client:
         await client.login(os.environ["DISCORD_TOKEN"])
         guild = await client.fetch_guild(GUILD_ID)
@@ -64,61 +67,82 @@ async def main():
                                                   create_private_threads=False, add_reactions=True),
             me: discord.PermissionOverwrite(send_messages=True, embed_links=True, attach_files=True),
         }
+        humans = [m async for m in guild.fetch_members(limit=None) if not m.bot]
 
-        info = await guild.create_category("📌 INFO", overwrites=read_only, position=0)
-        chat = await guild.create_category("💬 CHAT", position=1)
-        support = await guild.create_category("🛠️ SUPPORT", position=2)
-        voice = await guild.create_category("🔊 VOICE", position=3)
+        top = await guild.create_category("🎧 SPOTIFY CHAT", position=0)
+        info = await guild.create_category("📌 INFO", overwrites=read_only, position=1)
+        chat = await guild.create_category("💬 CHAT", position=2)
+        support = await guild.create_category("🛠️ SUPPORT", position=3)
+        voice = await guild.create_category("🔊 VOICE", position=4)
 
+        counter = await guild.create_voice_channel(
+            f"👥 Members: {len(humans)}", category=top,
+            overwrites={everyone: discord.PermissionOverwrite(connect=False, view_channel=True)})
         welcome = await guild.create_text_channel("👋┃welcome", category=info, position=0,
                                                   topic="What Spotify Chat is and where to get it")
-        rules = await guild.create_text_channel("📜┃rules", category=info, position=1, topic="Keep it chill")
-        await guild.create_text_channel("📣┃releases", category=info, position=2,
-                                        topic=f"New versions of Spotify Chat. Download: {RELEASES}")
+        new_people = await guild.create_text_channel("🎉┃new-people", category=info, position=1,
+                                                     topic="Say hi to everyone who just joined")
+        rules = await guild.create_text_channel("📜┃rules", category=info, position=2, topic="Keep it chill")
+        releases = await guild.create_text_channel("📣┃releases", category=info, position=3,
+                                                   topic=f"New versions of Spotify Chat. Download: {RELEASES}")
 
-        general = await client.fetch_channel(GENERAL_ID)
-        await general.edit(name="💬┃general", category=chat, position=0, sync_permissions=True,
-                           topic="Talk about anything")
-        irc = await client.fetch_channel(IRC_ID)
-        await irc.edit(name="🎵┃irc", category=chat, position=1, sync_permissions=True)
-        await guild.create_text_channel("🎧┃now-playing", category=chat, position=2,
-                                        topic="Share what you're listening to")
+        now_playing = await guild.create_text_channel("🎧┃now-playing", category=chat, position=2,
+                                                      topic="Share what you're listening to")
         await guild.create_text_channel("📸┃screenshots", category=chat, position=3,
                                         topic="Your overlay, your setup, your music")
-
         await guild.create_text_channel("🐛┃bug-reports", category=support, position=0,
                                         topic="What happened, your Minecraft version and Spotify Chat version")
         await guild.create_text_channel("💡┃suggestions", category=support, position=1,
                                         topic="Ideas for Spotify Chat")
+        hangout = await guild.create_voice_channel("🔊 Hangout", category=voice, position=1)
 
-        old_voice = await client.fetch_channel(VOICE_ID)
-        await old_voice.edit(name="🎶 Listening Party", category=voice, position=0, sync_permissions=True)
-        await guild.create_voice_channel("🔊 Hangout", category=voice, position=1)
-
-        for cid in OLD_CATEGORY_IDS:  # the empty default categories
+        # Discord's default channels move into the new categories. The API moves one channel to another
+        # category per call, and editing category + position together doesn't stick without a cache.
+        for cid, name, parent in ((GENERAL_ID, "💬┃general", chat), (IRC_ID, "🎵┃irc", chat),
+                                  (VOICE_ID, "🎶 Listening Party", voice)):
+            channel = await client.fetch_channel(cid)
+            await channel.edit(name=name)
+            await client.http.bulk_channel_update(GUILD_ID, [{"id": cid, "parent_id": parent.id,
+                                                              "lock_permissions": True}])
+        await client.http.bulk_channel_update(GUILD_ID, [
+            {"id": GENERAL_ID, "position": 0}, {"id": IRC_ID, "position": 1},
+            {"id": VOICE_ID, "position": 0}, {"id": hangout.id, "position": 1}])
+        for cid in OLD_CATEGORY_IDS:  # the default categories, empty now
             try:
-                old = await client.fetch_channel(cid)
-                if not getattr(old, "channels", []):
-                    await old.delete(reason="Replaced by the new layout")
+                await (await client.fetch_channel(cid)).delete(reason="Replaced by the new layout")
             except discord.NotFound:
                 pass
 
-        dev = await guild.create_role(name="Developer", color=discord.Color(GREEN), hoist=True,
-                                      reason="Spotify Chat developer")
-        owner = await guild.fetch_member(guild.owner_id)
-        await owner.add_roles(dev)
+        dev = await guild.create_role(name="Developer", color=discord.Color(GREEN), hoist=True)
+        await (await guild.fetch_member(guild.owner_id)).add_roles(dev)
+        listener = await guild.create_role(name="🎧 Listener", color=discord.Color(0x86EFAC), hoist=True)
+        for m in humans:
+            await m.add_roles(listener)
 
         with open("emoji.png", "rb") as f:
             await guild.create_custom_emoji(name="spotifycat", image=f.read())
 
-        await guild.edit(system_channel=general,
+        # Join messages off: the bridge posts its own welcome card in new-people
+        await guild.edit(system_channel=new_people,
+                         system_channel_flags=discord.SystemChannelFlags(
+                             join_notifications=False, premium_subscriptions=True,
+                             guild_reminder_notifications=False, join_notification_replies=False),
                          default_notifications=discord.NotificationLevel.only_mentions,
-                         explicit_content_filter=discord.ContentFilter.all_members)
+                         explicit_content_filter=discord.ContentFilter.all_members,
+                         verification_level=discord.VerificationLevel.low)
 
         await welcome.send(embed=welcome_embed(),
                            files=[discord.File("banner.png"), discord.File("avatar.png")])
         await rules.send(embed=rules_embed())
-        print("done")
+        invite = await new_people.create_invite(max_age=0, max_uses=0, unique=False)
+
+        print("Add to /etc/spotify-chat-bridge/bridge.env:")
+        print(f"RELEASES_CHANNEL_ID={releases.id}")
+        print(f"NEW_PEOPLE_CHANNEL_ID={new_people.id}")
+        print(f"NOW_PLAYING_CHANNEL_ID={now_playing.id}")
+        print(f"MEMBER_ROLE_ID={listener.id}")
+        print(f"MEMBER_COUNT_CHANNEL_ID={counter.id}")
+        print("Invite:", invite.url)
 
 
 asyncio.run(main())
