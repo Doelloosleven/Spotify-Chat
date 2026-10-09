@@ -244,9 +244,9 @@ public class SpotifyConfigScreen extends Screen {
                 });
         y += step;
         toggle(left, y, panelW - 16, rowH, "Guild IRC (automatic for guild members)",
-                "A private IRC for your Hypixel guild, if your guild has one. The Spotify Chat bot checks that "
-                        + "you're in the guild (your Minecraft name is confirmed with Mojang, the same check a "
-                        + "server does when you join) and lets you in. Nobody else can join.",
+                "A private IRC for your Hypixel guild. When you join Hypixel, Spotify Chat checks your guild "
+                        + "with /g online (hidden), confirms your Minecraft name with Mojang (the same check a "
+                        + "server does when you join) and the Spotify Chat bot lets you into your guild's chat.",
                 () -> cfg.guildIrcEnabled, v -> {
                     cfg.guildIrcEnabled = v;
                     client.irc().setGuildEnabled(v);

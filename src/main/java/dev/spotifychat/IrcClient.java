@@ -14,6 +14,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.Deque;
 import java.util.HexFormat;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
@@ -31,9 +32,10 @@ import java.util.regex.Pattern;
  * (like Jam invites) never go through the server's chat. Uses Rizon over TLS: Rizon hides everyone's
  * IP address behind a scrambled host, so other people in the channel can't see where you connect from.
  *
- * Guild IRC: the bridge bot (BRIDGE_NICK) runs a hidden, invite-only channel for one Hypixel guild. After
- * joining #spotifychat the client asks the bot for it; if your Minecraft name belongs to a guild member, the
- * bot sends a random code, the client proves the name to Mojang (see prove) and the bot invites it.
+ * Guild IRC: the bridge bot (BRIDGE_NICK) runs a hidden, invite-only channel for each Hypixel guild. After
+ * joining #spotifychat the client asks the bot for its guild's (with the guild name the game showed, see
+ * setGuildName); if the bot agrees you're in it, it sends a random code, the client proves the Minecraft name
+ * to Mojang (see prove) and the bot invites it.
  */
 public final class IrcClient {
     public static final String SERVER = "irc.rizon.net";
@@ -98,6 +100,8 @@ public final class IrcClient {
 
     // Guild channel
     private volatile boolean guildEnabled;
+    /** Your Hypixel guild as the game showed it: null = not known yet, "" = not in a guild */
+    private volatile String guildName;
     /** The guild channel we're in, or null */
     private volatile String guildChannel;
     /** The channel the bot invited us to, until we're in it */
@@ -188,6 +192,26 @@ public final class IrcClient {
     }
 
     /**
+     * Your Hypixel guild (null = not known yet, "" = none). Moving to another guild, or leaving it, leaves the
+     * old guild's channel; then the bot is asked for the new one.
+     */
+    public void setGuildName(String name) {
+        String old = guildName;
+        guildName = name;
+        if (Objects.equals(old, name)) return;
+        String g = guildChannel != null ? guildChannel : guildJoining;
+        if (g != null && (old != null || "".equals(name))) {
+            leftGuild();
+            try {
+                raw("PART " + g);
+            } catch (Exception ignored) {
+            }
+        }
+        lastGuildAsk = 0;
+        askGuild();
+    }
+
+    /**
      * Sends a line to the channel (or the guild channel). Returns the text exactly as it was sent (see
      * outgoing), or null when not connected. It's shown in chat (onMessage) only once the server has accepted it.
      */
@@ -239,6 +263,11 @@ public final class IrcClient {
             if (m.matches()) return new Message(m.group(1).strip(), m.group(2), false, guild, true);
         }
         return new Message(from, text, action, guild, false);
+    }
+
+    /** "SCGUILD HELLO <name> [<guild>]", the CTCP message that asks the bridge bot for the guild channel */
+    static String guildHello(String minecraftName, String guild) {
+        return "\u0001SCGUILD HELLO " + minecraftName + (guild == null ? "" : " " + guild) + "\u0001";
     }
 
     /** The Mojang server id for the bridge bot's code: sha1(AUTH_PREFIX + code) in hex */
@@ -470,16 +499,18 @@ public final class IrcClient {
         throw new IllegalStateException("connection closed");
     }
 
-    /** Asks the bridge bot to let us into the guild channel (it answers only guild members with a code) */
+    /** Asks the bridge bot to let us into our guild's channel (it answers only guild members with a code) */
     private void askGuild() {
         long now = System.currentTimeMillis();
-        if (!guildEnabled || status != Status.CONNECTED || guildChannel != null || now - lastGuildAsk < GUILD_ASK_GAP_MS) {
+        String guild = guildName;
+        if (!guildEnabled || status != Status.CONNECTED || guildChannel != null || "".equals(guild)
+                || now - lastGuildAsk < GUILD_ASK_GAP_MS) {
             return;
         }
         lastGuildAsk = now;
         awaitingCode = true;
         try {
-            raw("PRIVMSG " + BRIDGE_NICK + " :\u0001SCGUILD HELLO " + minecraftName + "\u0001");
+            raw("PRIVMSG " + BRIDGE_NICK + " :" + guildHello(minecraftName, guild));
         } catch (Exception ignored) {
         }
     }

@@ -8,6 +8,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.gui.screens.ChatScreen;
@@ -115,6 +116,11 @@ public class SpotifyChatClient implements ClientModInitializer {
     private volatile boolean ircMode;
     /** Same for the guild IRC key (]) */
     private volatile boolean guildIrcMode;
+    /** Reads your guild from Hypixel's /g online, for the guild IRC */
+    private final HypixelGuild hypixelGuild = new HypixelGuild();
+    /** When to send the hidden /g online after joining Hypixel (0 = not planned) */
+    private volatile long guildCheckAt;
+    private static final long GUILD_CHECK_DELAY_MS = 3_000;
     private boolean updateNotified = false;
     /** Auto-update was just switched on by the new default: say so once, after joining a world */
     private boolean autoUpdateNotice = false;
@@ -237,6 +243,25 @@ public class SpotifyChatClient implements ClientModInitializer {
             else shareNowPlaying(channel);
         });
 
+        // Your guild for the guild IRC, read from Hypixel's guild list. The answer to our own /g online stays
+        // out of chat.
+        ClientReceiveMessageEvents.ALLOW_GAME.register((message, overlay) -> {
+            if (overlay || !onHypixel()) return true;
+            long now = System.currentTimeMillis();
+            boolean hide = true;
+            for (String line : ChatFormatting.stripFormatting(message.getString()).split("\\R", -1)) {
+                String guild = hypixelGuild.read(line);
+                if (guild != null) guildSeen(guild);
+                hide &= hypixelGuild.hide(line, now);
+            }
+            return !hide;
+        });
+
+        // Joined Hypixel: check your guild once, a few seconds in
+        ClientPlayConnectionEvents.JOIN.register((handler, sender, mc) -> guildCheckAt =
+                onHypixel() && config.ircEnabled && config.guildIrcEnabled
+                        ? System.currentTimeMillis() + GUILD_CHECK_DELAY_MS : 0);
+
         // Overlay on the HUD
         HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("spotifychat", "overlay"), new SpotifyOverlay());
 
@@ -254,6 +279,7 @@ public class SpotifyChatClient implements ClientModInitializer {
 
         irc = new IrcClient(m -> runOnGame(() -> showIrc(m)), notice -> runOnGame(() -> ircInfo(notice)),
                 Mc::joinServer);
+        irc.setGuildName(config.hypixelGuild);
         irc.setGuildEnabled(config.guildIrcEnabled);
 
         // Chat opened with [ or ]: green "IRC" label above the input, and back to normal once it closes
@@ -288,6 +314,11 @@ public class SpotifyChatClient implements ClientModInitializer {
                 applyNewKeyDefaults(mc);
             }
             sendPending(mc);
+            if (guildCheckAt != 0 && System.currentTimeMillis() >= guildCheckAt && mc.getConnection() != null) {
+                guildCheckAt = 0;
+                hypixelGuild.asked(System.currentTimeMillis());
+                mc.getConnection().sendCommand("g online");
+            }
             while (overlayKey.consumeClick()) toggleOverlay();
             while (playPauseKey.consumeClick()) control(SpotifyControls.Action.PLAY_PAUSE);
             while (nextKey.consumeClick()) control(SpotifyControls.Action.NEXT);
@@ -469,6 +500,10 @@ public class SpotifyChatClient implements ClientModInitializer {
 
     /** Hypixel warns and punishes for links ("advertising") */
     private static boolean linksBlockedHere() {
+        return onHypixel();
+    }
+
+    private static boolean onHypixel() {
         ServerData server = Minecraft.getInstance().getCurrentServer();
         return server != null && server.ip != null && server.ip.toLowerCase(Locale.ROOT).contains("hypixel");
     }
@@ -510,8 +545,20 @@ public class SpotifyChatClient implements ClientModInitializer {
     /** Why you can't write to the guild IRC right now, or null if you can */
     private String guildIrcProblem() {
         if (!config.ircEnabled || !config.guildIrcEnabled) return "Guild IRC is off (turn it on in /spotify > IRC)";
-        if (!irc.inGuild()) return "Not in a guild IRC: it's only for guilds that have one, and you're let in automatically";
+        if (!irc.inGuild()) {
+            return "".equals(config.hypixelGuild) ? "You're not in a Hypixel guild"
+                    : "Not in your guild's IRC yet: you're let in automatically after joining Hypixel";
+        }
         return null;
+    }
+
+    /** Hypixel showed your guild ("" = none): remember it and tell the guild IRC */
+    private void guildSeen(String guild) {
+        if (guild.equals(config.hypixelGuild)) return;
+        LOGGER.info("Hypixel guild: {}", guild.isEmpty() ? "none" : guild);
+        config.hypixelGuild = guild;
+        config.save();
+        irc.setGuildName(guild);
     }
 
     /** With IRC on, the Jam link goes to IRC; the server only gets the note if that's switched on. */

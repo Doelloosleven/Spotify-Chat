@@ -69,6 +69,8 @@ public class ModConfig {
     public boolean ircEnabled = true;
     /** Join your guild's private IRC channel when the bridge bot confirms you're in the guild */
     public boolean guildIrcEnabled = true;
+    /** Your Hypixel guild from the last /g online or /g list: null = not seen yet, "" = not in a guild */
+    public String hypixelGuild = null;
 
     // ---- Updates
     /** Chat message when a newer version is on GitHub */

@@ -7,8 +7,8 @@ up the player's Hypixel guild, asks the mod to prove the name with Mojang (the s
 and invites it into that guild's channel. Leaving the guild gets you kicked. One guild's channel can also be
 linked to a Discord channel (GUILD_DISCORD_CHANNEL_ID + GUILD_HYPIXEL_NAME).
 
-Without a Hypixel API key there's only that one linked guild, and who's in it comes from Discord roles:
-GUILD_ROLES, which the guild's own bot hands out to real guild members.
+Without a Hypixel API key the bot goes by the guild name the mod read in game (/g online). The linked guild
+still needs Discord roles too: GUILD_ROLES, which the guild's own bot hands out to real guild members.
 
 Settings come from the environment (see spotify-chat-bridge.service):
   DISCORD_TOKEN             bot token (keep it in /etc/spotify-chat-bridge/token.env, never in git)
@@ -76,6 +76,7 @@ log = logging.getLogger("bridge")
 IRC_FORMATTING = re.compile(r"\x03(\d{1,2}(,\d{1,2})?)?|[\x02\x0f\x11\x16\x1d\x1e\x1f]")
 CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 MC_NAME = re.compile(r"[A-Za-z0-9_]{1,16}")
+GUILD_NAME = re.compile(r"[A-Za-z0-9_ ]{1,32}")
 UUID = re.compile(r"[0-9a-f]{32}")
 
 
@@ -255,7 +256,8 @@ class Room:
         self.channel = ""
         self.op = False
         self.ready = asyncio.Event()
-        self.verified: dict[str, tuple[str, str]] = {}  # lowercase nick -> (Minecraft name, uuid) Mojang confirmed
+        # lowercase nick -> (Minecraft name, uuid) Mojang confirmed, and the guild name their mod said
+        self.verified: dict[str, tuple[str, str, str | None]] = {}
         self.present: set[str] = set()                   # lowercase nicks in the channel, besides us
         self.last_used = time.monotonic()
 
@@ -263,13 +265,14 @@ class Room:
 class Irc:
     def __init__(self, on_message, guild_of):
         self.on_message = on_message    # async (target, nick, text, action): target is OPEN or a Room
-        self.guild_of = guild_of        # async (Minecraft name, uuid or None) -> (guild key, guild name) or None
+        # async (Minecraft name, uuid or None, guild name the mod said or None) -> (guild key, guild name) or None
+        self.guild_of = guild_of
         self.writer = None
         self.nick = IRC_NICK
         self.joined = asyncio.Event()   # in #spotifychat
         self.outbox: asyncio.Queue[tuple[str, str]] = asyncio.Queue(maxsize=30)
         self.rooms: dict[str, Room] = {}  # guild key -> its channel
-        self.pending: dict[str, tuple[str, str, float]] = {}  # nick -> (name, code, when)
+        self.pending: dict[str, tuple[str, str, float, str | None]] = {}  # nick -> (name, code, when, guild)
         self.last_hello: dict[str, float] = {}
         self.tasks: set[asyncio.Task] = set()
 
@@ -467,13 +470,14 @@ class Irc:
         room.verified.pop(key, None)
 
     async def private(self, sender: str, text: str):
-        """The mod's guild check: "SCGUILD HELLO <name>", then "SCGUILD PROVED" after the Mojang join."""
+        """The mod's guild check: "SCGUILD HELLO <name> [<guild name>]", then "SCGUILD PROVED" after the Mojang
+        join. Mods before 1.5.0 don't send the guild name."""
         if not (text.startswith("\x01SCGUILD ") and text.endswith("\x01")):
             return
         words = text[9:-1].split()
         key = sender.lower()
         now = time.monotonic()
-        if words[:1] == ["HELLO"] and len(words) == 2:
+        if words[:1] == ["HELLO"] and len(words) >= 2:
             if now - self.last_hello.get(key, -HELLO_GAP) < HELLO_GAP:
                 return
             if len(self.last_hello) > 10_000:
@@ -481,19 +485,20 @@ class Irc:
             self.last_hello[key] = now
             for k in [k for k, p in self.pending.items() if now - p[2] > PROVE_TIMEOUT]:
                 del self.pending[k]
-            if MC_NAME.fullmatch(words[1]):
-                self.spawn(self.offer(sender, words[1]))
+            claim = " ".join(words[2:]) or None
+            if MC_NAME.fullmatch(words[1]) and (claim is None or GUILD_NAME.fullmatch(claim)):
+                self.spawn(self.offer(sender, words[1], claim))
             else:
                 self.notice(sender, "NO")
         elif words == ["PROVED"]:
             p = self.pending.pop(key, None)
             if p and now - p[2] <= PROVE_TIMEOUT:
-                self.spawn(self.let_in(sender, p[0], p[1]))
+                self.spawn(self.let_in(sender, p[0], p[1], p[3]))
 
-    async def offer(self, nick: str, name: str):
+    async def offer(self, nick: str, name: str, claim: str | None):
         """A guild member gets a code to prove their name with; everyone else a no."""
         try:
-            guild = await self.guild_of(name, None)
+            guild = await self.guild_of(name, None, claim)
         except CheckFailed as e:
             log.warning("guild check for %s failed: %s", name, e)
             self.notice(nick, "FAIL couldn't check your guild right now")
@@ -502,16 +507,16 @@ class Irc:
             self.notice(nick, "NO")
             return
         code = secrets.token_hex(16)
-        self.pending[nick.lower()] = (name, code, time.monotonic())
+        self.pending[nick.lower()] = (name, code, time.monotonic(), claim)
         self.notice(nick, f"PROVE {code}")
 
-    async def let_in(self, nick: str, name: str, code: str):
+    async def let_in(self, nick: str, name: str, code: str, claim: str | None):
         profile = await has_joined(name, server_id(code))
         if profile is None:
             self.notice(nick, "FAIL Mojang didn't confirm your account")
             return
         try:
-            guild = await self.guild_of(profile["name"], profile["id"])
+            guild = await self.guild_of(profile["name"], profile["id"], claim)
         except CheckFailed as e:
             log.warning("guild check for %s failed: %s", profile["name"], e)
             self.notice(nick, "FAIL couldn't check your guild right now")
@@ -531,7 +536,7 @@ class Irc:
                 return
             room = self.rooms[guild[0]] = Room(*guild)
             self.open_room(room)
-        room.verified[key] = (profile["name"], profile["id"])
+        room.verified[key] = (profile["name"], profile["id"], claim)
         room.last_used = time.monotonic()
         if room.ready.is_set():
             self.raw(f"INVITE {nick} {room.channel}")
@@ -546,9 +551,9 @@ class Irc:
             elif now - room.last_used > ROOM_IDLE:
                 self.close_room(room)
                 continue
-            for key, (name, uuid) in list(room.verified.items()):
+            for key, (name, uuid, claim) in list(room.verified.items()):
                 try:
-                    guild = await self.guild_of(name, uuid)
+                    guild = await self.guild_of(name, uuid, claim)
                 except CheckFailed:
                     continue  # can't tell right now: leave them be
                 if (guild is None or guild[0] != room.key) and room.verified.pop(key, None):
@@ -718,7 +723,8 @@ class Bridge(discord.Client):
                 log.error("can't see Discord channel %s: check the id and the bot's permissions", cid)
             else:
                 log.info("%s IRC <-> #%s in %s", name, channel.name, channel.guild.name)
-        log.info("guild IRC: %s", "every Hypixel guild" if self.hypixel else "Discord roles, one guild")
+        log.info("guild IRC: %s", "Hypixel API" if self.hypixel else "guild names from the mod, Discord roles for "
+                 + (self.linked_guild or "the linked guild"))
 
     async def check_link(self):
         """Logs which Hypixel guild the Discord guild channel belongs to, to catch a typo in its name early
@@ -733,11 +739,17 @@ class Bridge(discord.Client):
         else:
             log.info("Discord guild channel is linked to Hypixel guild %s", guild.get("name"))
 
-    async def guild_of(self, name: str, uuid: str | None) -> tuple[str, str] | None:
-        """The guild a Minecraft player is in, as (key, name), or None. Hypixel's answer when there's an API key,
-        otherwise the Discord roles of the one linked guild. CheckFailed when it can't tell right now."""
+    async def guild_of(self, name: str, uuid: str | None, claim: str | None) -> tuple[str, str] | None:
+        """The guild a Minecraft player is in, as (key, name), or None. CheckFailed when it can't tell right now.
+
+        With an API key that's Hypixel's answer. Without one it's the guild name the mod read in game (claim):
+        good enough until the key comes, but a modded client could say anything, so the linked guild (whose
+        channel goes to Discord) also needs the Discord role. Mods before 1.5.0 send no claim and only get the
+        linked guild."""
         if self.hypixel is None:
-            return (ROLE_GUILD, self.linked_guild or "the guild") if self.is_member(name) else None
+            if claim is None or claim.lower() == self.linked_guild.lower():
+                return (ROLE_GUILD, self.linked_guild or "the guild") if self.is_member(name) else None
+            return "claim:" + claim.lower(), claim
         if uuid is None:
             now = time.monotonic()
             when, uuid = self.uuids.get(name.lower(), (0.0, None))
