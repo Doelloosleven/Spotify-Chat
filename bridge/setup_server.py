@@ -75,9 +75,11 @@ async def main():
         support = await guild.create_category("🛠️ SUPPORT", position=3)
         voice = await guild.create_category("🔊 VOICE", position=4)
 
-        counter = await guild.create_voice_channel(
-            f"👥 Members: {len(humans)}", category=top,
-            overwrites={everyone: discord.PermissionOverwrite(connect=False, view_channel=True)})
+        # Nobody joins or talks in the counter. The bot needs Connect too: without it Discord hides a voice
+        # channel from the bot completely, and it couldn't rename it anymore.
+        counter = await guild.create_voice_channel(f"👥 Members: {len(humans)}", category=top, overwrites={
+            everyone: discord.PermissionOverwrite(view_channel=True, connect=False, send_messages=False),
+            me: discord.PermissionOverwrite(view_channel=True, connect=True, manage_channels=True)})
         welcome = await guild.create_text_channel("👋┃welcome", category=info, position=0,
                                                   topic="What Spotify Chat is and where to get it")
         new_people = await guild.create_text_channel("🎉┃new-people", category=info, position=1,
@@ -86,8 +88,9 @@ async def main():
         releases = await guild.create_text_channel("📣┃releases", category=info, position=3,
                                                    topic=f"New versions of Spotify Chat. Download: {RELEASES}")
 
-        now_playing = await guild.create_text_channel("🎧┃now-playing", category=chat, position=2,
-                                                      topic="Share what you're listening to")
+        now_playing = await guild.create_text_channel(  # the bot's live song feed: read-only like INFO
+            "🎧┃now-playing", category=chat, position=2, overwrites=read_only,
+            topic="What everyone is listening to in game. Type !spotify in the IRC chat ([) to show up here")
         await guild.create_text_channel("📸┃screenshots", category=chat, position=3,
                                         topic="Your overlay, your setup, your music")
         await guild.create_text_channel("🐛┃bug-reports", category=support, position=0,
