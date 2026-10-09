@@ -120,6 +120,8 @@ public class SpotifyChatClient implements ClientModInitializer {
     private final HypixelGuild hypixelGuild = new HypixelGuild();
     /** When to send the hidden /g online after joining Hypixel (0 = not planned) */
     private volatile long guildCheckAt;
+    /** The server connection the guild was checked on */
+    private Object guildCheckedOn;
     private static final long GUILD_CHECK_DELAY_MS = 3_000;
     private boolean updateNotified = false;
     /** Auto-update was just switched on by the new default: say so once, after joining a world */
@@ -257,10 +259,16 @@ public class SpotifyChatClient implements ClientModInitializer {
             return !hide;
         });
 
-        // Joined Hypixel: check your guild once, a few seconds in
-        ClientPlayConnectionEvents.JOIN.register((handler, sender, mc) -> guildCheckAt =
-                onHypixel() && config.ircEnabled && config.guildIrcEnabled
-                        ? System.currentTimeMillis() + GUILD_CHECK_DELAY_MS : 0);
+        // Joined Hypixel: check your guild once, a few seconds in. Once per login: switching servers inside
+        // Hypixel can join again on the same connection.
+        ClientPlayConnectionEvents.JOIN.register((handler, sender, mc) -> {
+            if (!onHypixel() || !config.ircEnabled || !config.guildIrcEnabled
+                    || handler.getConnection() == guildCheckedOn) {
+                return;
+            }
+            guildCheckedOn = handler.getConnection();
+            guildCheckAt = System.currentTimeMillis() + GUILD_CHECK_DELAY_MS;
+        });
 
         // Overlay on the HUD
         HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("spotifychat", "overlay"), new SpotifyOverlay());
@@ -293,12 +301,11 @@ public class SpotifyChatClient implements ClientModInitializer {
                     boolean guild = guildIrcMode && config.ircEnabled;
                     if (!ircMode() && !guild) return;
                     var font = Minecraft.getInstance().font;
-                    String label = guild ? "GUILD IRC" : "IRC";
+                    Component label = Component.literal(guild ? "GUILD IRC" : "IRC").withStyle(ChatFormatting.BOLD);
                     String hint = guild ? "this message goes to your guild" : "this message goes to " + irc.channel();
-                    int x = 2, y = s.height - 27, lw = font.width(label) + 8;
+                    int x = 2, y = s.height - 27, lw = font.width(label) + 8; // bold is wider: measure it bold
                     SpotifyUi.pill(g, x, y, lw, 11, SpotifyUi.accent());
-                    g.text(font, Component.literal(label).withStyle(ChatFormatting.BOLD), x + 4, y + 2,
-                            SpotifyUi.BLACK, false);
+                    g.text(font, label, x + 4, y + 2, SpotifyUi.BLACK, false);
                     SpotifyUi.pill(g, x + lw + 2, y, font.width(hint) + 8, 11, 0xC0121212);
                     g.text(font, hint, x + lw + 6, y + 2, SpotifyUi.GRAY, false);
                 });
