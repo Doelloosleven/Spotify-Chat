@@ -23,6 +23,8 @@ Settings come from the environment (see spotify-chat-bridge.service):
   NOW_PLAYING_CHANNEL_ID    optional: songs shared with !spotify in the open IRC, with album covers
   MEMBER_ROLE_ID            optional: role every new member gets
   MEMBER_COUNT_CHANNEL_ID   optional: channel renamed to "👥 Members: N"
+  IRC_KEEP_DAYS             optional: messages in the open IRC's Discord channel are deleted after this many
+                            days (pinned ones stay); not set = kept forever
   IRC_NICK                  optional, default SpotifyDiscord
 
 `bridge.py --list-channels` prints the text channels the bot can see, to find the channel id.
@@ -38,6 +40,7 @@ import secrets
 import ssl
 import sys
 import time
+from datetime import timedelta
 from urllib.parse import quote
 
 import aiohttp
@@ -61,6 +64,7 @@ AUTH_PREFIX = "SpotifyChat guild IRC:"
 HELLO_GAP = 20              # seconds between guild requests from one nick
 PROVE_TIMEOUT = 120
 RECHECK_EVERY = 300
+CLEANUP_EVERY = 3600        # how often old IRC messages are deleted on Discord (IRC_KEEP_DAYS)
 HYPIXEL_GUILD_URL = "https://api.hypixel.net/v2/guild"
 HYPIXEL_CACHE = 3600        # seconds a guild's member list is trusted; Hypixel asks for about once an hour
 UUID_CACHE = 3600
@@ -629,6 +633,7 @@ class Bridge(discord.Client):
         self.now_playing_channel = extras.get("now_playing", 0)
         self.member_role = extras.get("member_role", 0)
         self.member_count_channel = extras.get("member_count", 0)
+        self.keep_days = extras.get("keep_days", 0)
         self.count_dirty = True
         self.irc = Irc(self.from_irc, self.guild_of)
 
@@ -639,6 +644,8 @@ class Bridge(discord.Client):
             self.release_task = asyncio.create_task(self.release_loop())
         if self.member_count_channel:
             self.count_task = asyncio.create_task(self.member_count_loop())
+        if self.keep_days:
+            self.cleanup_task = asyncio.create_task(self.cleanup_loop())
         if self.hypixel and self.linked_guild:
             self.link_task = asyncio.create_task(self.check_link())
 
@@ -692,6 +699,26 @@ class Bridge(discord.Client):
                     except discord.HTTPException as e:
                         log.warning("member count update failed: %s", e)
             await asyncio.sleep(360)
+
+    async def cleanup_loop(self):
+        await self.wait_until_ready()
+        while True:
+            try:
+                await self.delete_old_messages()
+            except discord.HTTPException as e:
+                log.warning("deleting old IRC messages failed: %s", e)
+            await asyncio.sleep(CLEANUP_EVERY)
+
+    async def delete_old_messages(self):
+        """Deletes what's older than IRC_KEEP_DAYS in the open IRC's Discord channel; pinned messages stay."""
+        channel = self.get_channel(self.channels.get(OPEN, 0))
+        if channel is None:
+            return
+        cutoff = discord.utils.utcnow() - timedelta(days=self.keep_days)
+        gone = await channel.purge(limit=None, before=cutoff, check=lambda m: not m.pinned,
+                                   reason=f"IRC messages are kept {self.keep_days} days")
+        if gone:
+            log.info("deleted %d IRC messages older than %d days", len(gone), self.keep_days)
 
     async def release_loop(self):
         """Posts each new GitHub release once. What's already posted is read back from the channel."""
@@ -904,7 +931,7 @@ def main():
     extras = {}
     for key, var in (("releases", "RELEASES_CHANNEL_ID"), ("new_people", "NEW_PEOPLE_CHANNEL_ID"),
                      ("now_playing", "NOW_PLAYING_CHANNEL_ID"), ("member_role", "MEMBER_ROLE_ID"),
-                     ("member_count", "MEMBER_COUNT_CHANNEL_ID")):
+                     ("member_count", "MEMBER_COUNT_CHANNEL_ID"), ("keep_days", "IRC_KEEP_DAYS")):
         value = os.environ.get(var, "").strip()
         if value.isdigit():
             extras[key] = int(value)

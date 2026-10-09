@@ -31,6 +31,7 @@ NEW_PEOPLE_CHANNEL_ID=<welcome card for everyone who joins, optional>
 NOW_PLAYING_CHANNEL_ID=<songs shared with !spotify in IRC, with album covers, optional>
 MEMBER_ROLE_ID=<role every new member gets, optional>
 MEMBER_COUNT_CHANNEL_ID=<channel renamed to "Members: N", optional>
+IRC_KEEP_DAYS=<delete messages in the IRC channel after this many days, pinned ones stay; optional>
 ```
 
 Then `sudo spotify-chat-bridge-token` (paste the token) and `sudo systemctl enable --now spotify-chat-bridge`. The bot needs the Message Content and Server Members intents. For every guild to get its own IRC, add a Hypixel API key with `sudo spotify-chat-bridge-token hypixel`.
