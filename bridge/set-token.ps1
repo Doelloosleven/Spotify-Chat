@@ -1,5 +1,8 @@
-# Paste box for the Discord bot token: sends it straight to the bridge server over SSH.
-# The token is never shown, saved on this PC or printed.
+# Paste box for the Discord bot token (or with -Hypixel the Hypixel API key): sends it straight to the bridge
+# server over SSH. It's never shown, saved on this PC or printed.
+param([switch]$Hypixel)
+$what = if ($Hypixel) { 'Hypixel API key' } else { 'Discord bot token' }
+$kind = if ($Hypixel) { 'hypixel' } else { 'discord' }
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
@@ -12,7 +15,7 @@ $form.FormBorderStyle = 'FixedDialog'
 $form.MaximizeBox = $false
 
 $label = New-Object System.Windows.Forms.Label
-$label.Text = 'Paste the Discord bot token (Ctrl+V) and click Save:'
+$label.Text = "Paste the $what (Ctrl+V) and click Save:"
 $label.Location = New-Object System.Drawing.Point(12, 14)
 $label.AutoSize = $true
 $form.Controls.Add($label)
@@ -47,6 +50,6 @@ if (-not $token) {
     exit
 }
 
-$result = $token | ssh -o BatchMode=yes spotify-bridge 'sudo spotify-chat-bridge-token' 2>&1
+$result = $token | ssh -o BatchMode=yes spotify-bridge "sudo spotify-chat-bridge-token $kind" 2>&1
 $token = $null
 [System.Windows.Forms.MessageBox]::Show(($result -join "`n"), 'Spotify Chat bridge') | Out-Null

@@ -56,4 +56,4 @@ Sign release jars with `tools/sign_release.py` and upload the `.sig` next to eac
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). Not affiliated with or endorsed by Hypixel, Mojang or Spotify.
