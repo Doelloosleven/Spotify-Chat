@@ -20,14 +20,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.security.GeneralSecurityException;
-import java.security.KeyFactory;
 import java.security.MessageDigest;
-import java.security.PublicKey;
-import java.security.Signature;
-import java.security.spec.X509EncodedKeySpec;
 import java.time.Duration;
-import java.util.Base64;
 import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Map;
@@ -296,18 +290,7 @@ public final class UpdateChecker {
 
     /** True if signature is a valid Ed25519 signature over everything in data, made with the key's private half. */
     static boolean signatureValid(String publicKeyBase64, InputStream data, byte[] signature) throws Exception {
-        PublicKey key = KeyFactory.getInstance("Ed25519")
-                .generatePublic(new X509EncodedKeySpec(Base64.getDecoder().decode(publicKeyBase64)));
-        Signature verifier = Signature.getInstance("Ed25519");
-        verifier.initVerify(key);
-        byte[] buf = new byte[8192];
-        int n;
-        while ((n = data.read(buf)) > 0) verifier.update(buf, 0, n);
-        try {
-            return verifier.verify(signature);
-        } catch (GeneralSecurityException e) {
-            return false; // malformed signature
-        }
+        return PreLaunchUpdate.signatureValid(publicKeyBase64, data, signature);
     }
 
     /**

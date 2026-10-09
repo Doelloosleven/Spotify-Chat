@@ -39,7 +39,7 @@ When a guild, party or co-op member types `!spotify`, your song gets sent back.
 - **IRC** is `#spotifychat` on Rizon and is linked to `#irc` on the [Spotify Chat Discord](https://discord.gg/3pNGbfkVgJ). Jam links go there too, because Hypixel punishes links in chat.
 - **Guild IRC**: a private IRC for every Hypixel guild. When you join Hypixel the mod checks your guild with a hidden `/g online`, confirms your Minecraft account with Mojang, and you're let into your guild's chat automatically.
 - **Overlay** shows the song and album cover in the album's colors. Move it in the settings.
-- **Auto-update** is on by default and only installs signed releases. Turn it off under Keys & Updates.
+- **Auto-update** is on by default and only installs signed releases; the new version is used from the next start. Turn it off under Keys & Updates. On Prism Launcher or MultiMC it can update right before the game starts instead: save [tools/prelaunch-update.ps1](tools/prelaunch-update.ps1) somewhere and set Settings > Custom commands > Pre-launch command to `powershell -NoProfile -ExecutionPolicy Bypass -File "C:\path\to\prelaunch-update.ps1"`.
 - **Phone / web player**: optional. Make an app at [developer.spotify.com](https://developer.spotify.com/dashboard) with redirect URI `http://127.0.0.1:8888/callback` (the app owner needs Premium), then `/spotify id <client id>` and `/spotify login`. The login is saved in `config/spotifychat-secrets.json`, don't share that file.
 
 ## Building
