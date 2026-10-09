@@ -1,6 +1,6 @@
 # Discord bridge
 
-Links the in-game IRC (`#spotifychat` on Rizon) to `#irc` on the [Spotify Chat Discord](https://discord.gg/v5GUAw9VkV), and runs the private guild IRC. Runs on a small Linux server as a systemd service.
+Links the in-game IRC (`#spotifychat` on Rizon) to `#irc` on the [Spotify Chat Discord](https://discord.gg/3pNGbfkVgJ), and runs the private guild IRC. Runs on a small Linux server as a systemd service.
 
 - `bridge.py`: the bot (Python 3.12, `discord.py`)
 - `spotify-chat-bridge.service`: systemd unit, reads `/etc/spotify-chat-bridge/bridge.env` and `token.env`
