@@ -49,6 +49,7 @@ import static net.fabricmc.fabric.api.client.command.v2.ClientCommands.literal;
  *                                goes to the IRC channel, since servers like Hypixel punish links
  *   [ key, /irc <message>        write a message to IRC (other Spotify Chat users over Rizon, not via the
  *                                server); T still opens normal chat
+ *   ] key, /girc <message>       write to your guild's private IRC (members are let in automatically)
  *   Someone else's "!spotify" / "!jam" in guild, party or co-op chat is answered in that same channel.
  *
  * Overlay: a "now playing" card on the HUD; /spotify overlay or a key from Controls turns it on/off.
@@ -104,7 +105,7 @@ public class SpotifyChatClient implements ClientModInitializer {
     private String jamLink;
 
     // Keys
-    private KeyMapping overlayKey, playPauseKey, nextKey, previousKey, ircKey, menuKey;
+    private KeyMapping overlayKey, playPauseKey, nextKey, previousKey, ircKey, guildIrcKey, menuKey;
 
     // IRC
     /** Chat messages starting with this go to the IRC channel instead of the server */
@@ -112,6 +113,8 @@ public class SpotifyChatClient implements ClientModInitializer {
     private IrcClient irc;
     /** True while a chat opened with the IRC key ([) is open: what you send from it goes to IRC */
     private volatile boolean ircMode;
+    /** Same for the guild IRC key (]) */
+    private volatile boolean guildIrcMode;
     private boolean updateNotified = false;
     /** Auto-update was just switched on by the new default: say so once, after joining a world */
     private boolean autoUpdateNotice = false;
@@ -152,10 +155,17 @@ public class SpotifyChatClient implements ClientModInitializer {
                 sendIrc(trimmed.substring(IRC_PREFIX.trim().length()).trim());
                 return false; // IRC messages never go to the server
             }
-            boolean trigger = config.enabled
-                    && (lower.equals("!jam") || lower.equals("!music") || lower.startsWith("!spotify"));
-            if (ircMode && config.ircEnabled && !trigger) {
-                sendIrc(trimmed); // chat opened with [ : this message goes to IRC (!spotify / !jam work as usual)
+            // Chat opened with [ (IRC) or ] (guild IRC): everything goes there, !spotify / !music / !jam too
+            String ircTarget = !config.ircEnabled ? null : ircMode ? IRC_TARGET : guildIrcMode ? GUILD_IRC_TARGET : null;
+            if (ircTarget != null) {
+                if (config.enabled && (lower.equals("!spotify") || lower.equals("!music"))) {
+                    // Your "!spotify" first (like in server chat); the song follows a second later
+                    if (ownShare(ircTarget) && showTriggerPublicly()) sendIrcTarget(ircTarget, trimmed);
+                } else if (config.enabled && config.jamEnabled && lower.equals("!jam")) {
+                    jamToIrc(ircTarget, trimmed);
+                } else {
+                    sendIrcTarget(ircTarget, trimmed);
+                }
                 return false;
             }
             if (!config.enabled) return true;
@@ -239,19 +249,26 @@ public class SpotifyChatClient implements ClientModInitializer {
         previousKey = registerKey("key.spotifychat.previous", InputConstants.KEY_LEFT, category);
         overlayKey = registerKey("key.spotifychat.toggle_overlay", InputConstants.UNKNOWN.getValue(), category);
         ircKey = registerKey("key.spotifychat.irc", InputConstants.KEY_LBRACKET, category);
+        guildIrcKey = registerKey("key.spotifychat.guild_irc", InputConstants.KEY_RBRACKET, category);
         menuKey = registerKey("key.spotifychat.menu", InputConstants.KEY_F4, category);
 
-        irc = new IrcClient(m -> runOnGame(() -> showIrc(m)), notice -> runOnGame(() -> ircInfo(notice)));
+        irc = new IrcClient(m -> runOnGame(() -> showIrc(m)), notice -> runOnGame(() -> ircInfo(notice)),
+                Mc::joinServer);
+        irc.setGuildEnabled(config.guildIrcEnabled);
 
-        // Chat opened with [: green "IRC" label above the input, and back to normal once it closes
+        // Chat opened with [ or ]: green "IRC" label above the input, and back to normal once it closes
         ScreenEvents.AFTER_INIT.register((mc, screen, w, h) -> {
             if (screen instanceof ChatScreen) {
-                ScreenEvents.remove(screen).register(s -> ircMode = false);
+                ScreenEvents.remove(screen).register(s -> {
+                    ircMode = false;
+                    guildIrcMode = false;
+                });
                 ScreenEvents.afterExtract(screen).register((s, g, mouseX, mouseY, delta) -> {
-                    if (!ircMode()) return;
+                    boolean guild = guildIrcMode && config.ircEnabled;
+                    if (!ircMode() && !guild) return;
                     var font = Minecraft.getInstance().font;
-                    String label = "IRC";
-                    String hint = "this message goes to " + irc.channel();
+                    String label = guild ? "GUILD IRC" : "IRC";
+                    String hint = guild ? "this message goes to your guild" : "this message goes to " + irc.channel();
                     int x = 2, y = s.height - 27, lw = font.width(label) + 8;
                     SpotifyUi.pill(g, x, y, lw, 11, SpotifyUi.accent());
                     g.text(font, Component.literal(label).withStyle(ChatFormatting.BOLD), x + 4, y + 2,
@@ -276,6 +293,7 @@ public class SpotifyChatClient implements ClientModInitializer {
             while (nextKey.consumeClick()) control(SpotifyControls.Action.NEXT);
             while (previousKey.consumeClick()) control(SpotifyControls.Action.PREVIOUS);
             while (ircKey.consumeClick()) openIrcChat(mc);
+            while (guildIrcKey.consumeClick()) openGuildIrcChat();
             while (menuKey.consumeClick()) {
                 // F3+F4 is Minecraft's game mode switcher: leave that alone
                 if (!mc.options.keyDebugModifier.isDown() && Mc.screen() == null) {
@@ -299,6 +317,14 @@ public class SpotifyChatClient implements ClientModInitializer {
                         .executes(ctx -> run(() -> ircInfo("Usage: /irc <message>, or press [ to write to IRC.")))
                         .then(argument("message", StringArgumentType.greedyString())
                                 .executes(ctx -> run(() -> sendIrc(StringArgumentType.getString(ctx, "message")))))));
+
+        // /girc <message>: one message to the guild IRC (same as the ] key)
+        ClientCommandRegistrationCallback.EVENT.register((dispatcher, buildContext) -> dispatcher.register(
+                literal("girc")
+                        .executes(ctx -> run(() -> ircInfo("Usage: /girc <message>, or press ] to write to the guild IRC.")))
+                        .then(argument("message", StringArgumentType.greedyString())
+                                .executes(ctx -> run(() ->
+                                        sendGuildIrc(StringArgumentType.getString(ctx, "message")))))));
 
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, buildContext) -> dispatcher.register(
                 literal("spotify")
@@ -371,6 +397,25 @@ public class SpotifyChatClient implements ClientModInitializer {
      * or the one from earlier in this session.
      */
     private boolean ownJam(String channel) {
+        if (!pickJamLink()) return false;
+        lastOwnShare.put("jam", System.currentTimeMillis());
+        return shareJam(channel, jamLink);
+    }
+
+    /** !jam typed in an IRC chat ([ or ]): your "!jam" and the link go to that IRC only, never to the server */
+    private void jamToIrc(String target, String trigger) {
+        if (!pickJamLink()) return;
+        String withLink = (config.jamPrefix.isBlank() ? "" : config.jamPrefix.strip() + " ") + jamLink;
+        if (!config.publicMessages) {
+            info(withLink, ChatFormatting.GREEN);
+            return;
+        }
+        if (showTriggerPublicly()) sendIrcTarget(target, trigger);
+        sendIrcTarget(target, withLink);
+    }
+
+    /** The Jam link from the clipboard, or the one from earlier; false (and a hint) if there's none */
+    private boolean pickJamLink() {
         String clip = "";
         try {
             clip = Minecraft.getInstance().keyboardHandler.getClipboard();
@@ -383,8 +428,7 @@ public class SpotifyChatClient implements ClientModInitializer {
                     ChatFormatting.YELLOW);
             return false;
         }
-        lastOwnShare.put("jam", System.currentTimeMillis());
-        return shareJam(channel, jamLink);
+        return true;
     }
 
     /**
@@ -451,6 +495,25 @@ public class SpotifyChatClient implements ClientModInitializer {
         Mc.openChat();
     }
 
+    /** ] key: like [, but for the guild IRC */
+    private void openGuildIrcChat() {
+        if (Mc.screen() != null) return;
+        String problem = guildIrcProblem();
+        if (problem != null) {
+            Mc.actionBar(Component.literal(problem).withStyle(ChatFormatting.YELLOW));
+            return;
+        }
+        guildIrcMode = true;
+        Mc.openChat();
+    }
+
+    /** Why you can't write to the guild IRC right now, or null if you can */
+    private String guildIrcProblem() {
+        if (!config.ircEnabled || !config.guildIrcEnabled) return "Guild IRC is off (turn it on in /spotify > IRC)";
+        if (!irc.inGuild()) return "Not in a guild IRC: it's only for guilds that have one, and you're let in automatically";
+        return null;
+    }
+
     /** With IRC on, the Jam link goes to IRC; the server only gets the note if that's switched on. */
     private boolean jamGoesToServerChat(String channel) {
         if (!ircConnected()) return true; // link itself goes to chat (or nothing on Hypixel)
@@ -463,6 +526,7 @@ public class SpotifyChatClient implements ClientModInitializer {
 
     /** Called by the menu after IRC settings change */
     public void applyIrcSettings() {
+        irc.setGuildEnabled(config.guildIrcEnabled);
         if (!config.ircEnabled) irc.stop();
         else irc.start(Minecraft.getInstance().getUser().getName());
     }
@@ -477,7 +541,30 @@ public class SpotifyChatClient implements ClientModInitializer {
         if (IrcClient.outgoing(text).isBlank()) return;
         // Once the server accepts it, the IRC client shows it in chat exactly as it was sent (cleaned and cut
         // to fit), not as typed
-        if (irc.send(text) == null) ircInfo("Couldn't send, reconnecting...");
+        if (irc.send(text, false) == null) ircInfo("Couldn't send, reconnecting...");
+    }
+
+    /** "Channels" for a share that goes to IRC instead of the server ("#" can't start a server command) */
+    private static final String IRC_TARGET = "#irc", GUILD_IRC_TARGET = "#girc";
+
+    private static boolean isIrcTarget(String channel) {
+        return IRC_TARGET.equals(channel) || GUILD_IRC_TARGET.equals(channel);
+    }
+
+    private void sendIrcTarget(String target, String text) {
+        if (GUILD_IRC_TARGET.equals(target)) sendGuildIrc(text);
+        else sendIrc(text);
+    }
+
+    private void sendGuildIrc(String text) {
+        if (text.isBlank()) return;
+        String problem = guildIrcProblem();
+        if (problem != null) {
+            ircInfo(problem + ".");
+            return;
+        }
+        if (IrcClient.outgoing(text).isBlank()) return;
+        if (irc.send(text, true) == null) ircInfo("Couldn't send to the guild IRC, try again in a moment.");
     }
 
     private static void ircInfo(String text) {
@@ -488,10 +575,15 @@ public class SpotifyChatClient implements ClientModInitializer {
 
     private static final Pattern URL = Pattern.compile("https?://\\S+", Pattern.CASE_INSENSITIVE);
 
-    /** "[IRC] Nick: message" with every name in pink, and links clickable (Minecraft asks before opening them) */
+    /**
+     * "[IRC] Nick: message" with every name in pink, and links clickable (Minecraft asks before opening them).
+     * Guild IRC lines say [Guild IRC]; lines the bridge relays from Discord say [IRC Discord] / [Guild Discord].
+     */
     private void showIrc(IrcClient.Message m) {
+        String label = m.guild() ? (m.discord() ? "[Guild Discord] " : "[Guild IRC] ")
+                : (m.discord() ? "[IRC Discord] " : "[IRC] ");
         MutableComponent line = Component.empty()
-                .append(Component.literal("[IRC] ").withStyle(ChatFormatting.DARK_GREEN))
+                .append(Component.literal(label).withStyle(m.guild() ? ChatFormatting.AQUA : ChatFormatting.DARK_GREEN))
                 .append(Component.literal(m.action() ? "* " + m.nick() + " " : m.nick())
                         .withStyle(ChatFormatting.LIGHT_PURPLE));
         if (!m.action()) line.append(Component.literal(": ").withStyle(ChatFormatting.GRAY));
@@ -572,7 +664,7 @@ public class SpotifyChatClient implements ClientModInitializer {
 
     /** Spotify Chat's keys, in the order the menu shows them */
     public List<KeyMapping> keys() {
-        return List.of(menuKey, ircKey, playPauseKey, nextKey, previousKey, overlayKey);
+        return List.of(menuKey, ircKey, guildIrcKey, playPauseKey, nextKey, previousKey, overlayKey);
     }
 
     /** Opens / closes the Spotify Chat menu (F4 by default) */
@@ -707,6 +799,7 @@ public class SpotifyChatClient implements ClientModInitializer {
         info("/spotify pause | next | previous  - the same as commands", ChatFormatting.GRAY);
         info("[  - write a message to IRC (other Spotify Chat users, outside the server)", ChatFormatting.GRAY);
         info("/irc <message>  - same, as a command", ChatFormatting.GRAY);
+        info("]  or /girc <message>  - write to your guild's private IRC (if your guild has one)", ChatFormatting.GRAY);
         info("/spotify or F4  - open the settings menu", ChatFormatting.GRAY);
         info("/spotify public / private  - who sees the song (now: "
                 + (config.publicMessages ? "public" : "private") + ")", ChatFormatting.GRAY);
@@ -876,8 +969,10 @@ public class SpotifyChatClient implements ClientModInitializer {
     private record PendingSend(String channel, String text, boolean fromShare, long notBefore) {}
 
     private void queueSend(String channel, String text, boolean fromShare, long notBefore) {
-        int max = channel == null ? MAX_CHAT_LENGTH : MAX_CHAT_LENGTH - channel.length() - 1;
-        if (text.length() > max) text = text.substring(0, max - 3) + "...";
+        if (!isIrcTarget(channel)) { // IRC cuts its own lines to fit
+            int max = channel == null ? MAX_CHAT_LENGTH : MAX_CHAT_LENGTH - channel.length() - 1;
+            if (text.length() > max) text = text.substring(0, max - 3) + "...";
+        }
         sendQueue.add(new PendingSend(channel, text, fromShare, notBefore));
     }
 
@@ -887,6 +982,10 @@ public class SpotifyChatClient implements ClientModInitializer {
         if (p == null || System.currentTimeMillis() < p.notBefore()) return;
         sendQueue.poll();
         if (p.fromShare()) busy = false;
+        if (isIrcTarget(p.channel())) {
+            sendIrcTarget(p.channel(), p.text());
+            return;
+        }
         if (mc.player == null || mc.getConnection() == null) return;
         LOGGER.info("Sending: {}", p.channel() == null ? p.text() : "/" + p.channel() + " " + p.text());
         if (p.channel() == null) mc.getConnection().sendChat(openChatText(p.text()));

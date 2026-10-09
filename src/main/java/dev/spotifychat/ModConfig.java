@@ -67,6 +67,8 @@ public class ModConfig {
 
     // ---- IRC chat (between Spotify Chat users in #spotifychat on Rizon, outside the Minecraft server)
     public boolean ircEnabled = true;
+    /** Join your guild's private IRC channel when the bridge bot confirms you're in the guild */
+    public boolean guildIrcEnabled = true;
 
     // ---- Updates
     /** Chat message when a newer version is on GitHub */

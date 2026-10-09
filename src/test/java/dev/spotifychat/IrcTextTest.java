@@ -56,4 +56,24 @@ class IrcTextTest {
         assertEquals("hi  JOIN #x", IrcClient.outgoing("hi\r\nJOIN #x"));
         assertEquals("short", IrcClient.outgoing("short"));
     }
+
+    @Test
+    void discordMessagesFromTheBridgeGetTheDiscordName() {
+        IrcClient.Message m = IrcClient.channelMessage("SpotifyDiscord", "<Doelloosleven> hi there", false, false);
+        assertEquals("Doelloosleven", m.nick());
+        assertEquals("hi there", m.text());
+        assertTrue(m.discord());
+        // Anyone else writing "<Name> text" is just themselves
+        IrcClient.Message other = IrcClient.channelMessage("Steve", "<Doelloosleven> hi", false, true);
+        assertEquals("Steve", other.nick());
+        assertEquals("<Doelloosleven> hi", other.text());
+        assertTrue(other.guild() && !other.discord());
+    }
+
+    @Test
+    void guildServerIdMatchesTheBridgeBot() {
+        // bridge.py: sha1("SpotifyChat guild IRC:" + code) in hex
+        assertEquals("1cf2b56ac1bbb9ee18f701ff51fe6d8489506660",
+                IrcClient.guildServerId("0123456789abcdef0123456789abcdef"));
+    }
 }

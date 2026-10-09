@@ -5,9 +5,12 @@ import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.components.ChatComponent;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.Services;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.UUID;
 
 /**
  * Small bridge for things Minecraft moved between versions, so one source works on 26.1.2, 26.2 and 26.3:
@@ -26,6 +29,7 @@ public final class Mc {
     private static final Method MC_SET_SCREEN = method(Minecraft.class, "setScreen", Screen.class);
     private static final Method MC_OPEN_CHAT =
             method(Minecraft.class, "openChatScreen", ChatComponent.ChatMethod.class);
+    private static final Method SESSION_SERVICE = method(Services.class, "sessionService");
 
     /** Gui (26.1.x) or Hud (26.2+): the object with getChat() and setOverlayMessage() */
     private static Object chatOwner() {
@@ -64,6 +68,29 @@ public final class Mc {
     public static void actionBar(Component text) {
         Object owner = chatOwner();
         call(method(owner.getClass(), "setOverlayMessage", Component.class, boolean.class), owner, text, false);
+    }
+
+    /**
+     * Tells Mojang this account is joining serverId, the way the game does when joining a server, so
+     * someone else can check with Mojang that you own your Minecraft name. The login itself only goes to
+     * Mojang. sessionService() returns a renamed authlib type in 26.3, hence the reflection.
+     */
+    public static void joinServer(String serverId) throws Exception {
+        Minecraft mc = Minecraft.getInstance();
+        Object sessionService = call(SESSION_SERVICE, mc.services());
+        Method join = null;
+        for (Class<?> c = sessionService.getClass(); c != null && join == null; c = c.getSuperclass()) {
+            for (Class<?> i : c.getInterfaces()) {
+                join = method(i, "joinServer", UUID.class, String.class, String.class);
+                if (join != null) break;
+            }
+        }
+        if (join == null) throw new IllegalStateException("Not available in this Minecraft version");
+        try {
+            join.invoke(sessionService, mc.getUser().getProfileId(), mc.getUser().getAccessToken(), serverId);
+        } catch (InvocationTargetException e) {
+            throw e.getCause() instanceof Exception cause ? cause : e;
+        }
     }
 
     // ------------------------------------------------------------ reflection

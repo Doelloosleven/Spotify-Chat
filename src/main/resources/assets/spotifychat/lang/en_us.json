@@ -4,6 +4,7 @@
   "key.spotifychat.previous": "Previous song",
   "key.spotifychat.toggle_overlay": "Show/hide song overlay",
   "key.spotifychat.irc": "Write to IRC chat",
+  "key.spotifychat.guild_irc": "Write to guild IRC chat",
   "key.spotifychat.menu": "Open/close Spotify Chat menu",
   "key.category.spotifychat.main": "Spotify Chat"
 }

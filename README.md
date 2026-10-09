@@ -26,7 +26,8 @@ No login needed, it reads the song from the Spotify desktop app. Client-side, wo
 | `!spotify` / `!music` | Share your song |
 | `/gc`, `/pc`, `/cc !spotify` | Share it in guild, party or co-op chat (Hypixel) |
 | `!jam` | Share your Spotify Jam link (copy it in Spotify first) |
-| <kbd>[</kbd> or `/irc <msg>` | Chat in the Spotify Chat IRC |
+| <kbd>[</kbd> or `/irc <msg>` | Chat in the Spotify Chat IRC (`!spotify` there shares your song in IRC) |
+| <kbd>]</kbd> or `/girc <msg>` | Chat in your guild's private IRC, if your guild has one |
 | <kbd>←</kbd> <kbd>→</kbd> <kbd>↓</kbd> | Previous / next / play-pause |
 | <kbd>F4</kbd> or `/spotify` | Settings |
 | `/spotify help` | All commands |
@@ -35,7 +36,8 @@ When a guild, party or co-op member types `!spotify`, your song gets sent back.
 
 ## Good to know
 
-- **Jam links** go to the IRC (`#spotifychat` on Rizon), because Hypixel punishes links in chat.
+- **IRC** is `#spotifychat` on Rizon and is linked to `#irc` on the [Spotify Chat Discord](https://discord.gg/kWa9kCnJ9U). Jam links go there too, because Hypixel punishes links in chat.
+- **Guild IRC**: a private IRC for guilds that have one set up. Members are let in automatically (the bot checks your guild role and confirms your Minecraft account with Mojang), nobody else can join.
 - **Overlay** shows the song and album cover in the album's colors. Move it in the settings.
 - **Auto-update** is on by default and only installs signed releases. Turn it off under Keys & Updates.
 - **Phone / web player**: optional. Make an app at [developer.spotify.com](https://developer.spotify.com/dashboard) with redirect URI `http://127.0.0.1:8888/callback` (the app owner needs Premium), then `/spotify id <client id>` and `/spotify login`. The login is saved in `config/spotifychat-secrets.json`, don't share that file.

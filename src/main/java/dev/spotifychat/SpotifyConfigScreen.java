@@ -242,16 +242,26 @@ public class SpotifyConfigScreen extends Screen {
                     cfg.ircEnabled = v;
                     client.applyIrcSettings();
                 });
+        y += step;
+        toggle(left, y, panelW - 16, rowH, "Guild IRC (automatic for guild members)",
+                "A private IRC for your Hypixel guild, if your guild has one. The Spotify Chat bot checks that "
+                        + "you're in the guild (your Minecraft name is confirmed with Mojang, the same check a "
+                        + "server does when you join) and lets you in. Nobody else can join.",
+                () -> cfg.guildIrcEnabled, v -> {
+                    cfg.guildIrcEnabled = v;
+                    client.irc().setGuildEnabled(v);
+                });
         y += step + 2;
         IrcClient irc = client.irc();
         String status = switch (irc.status()) {
-            case CONNECTED -> "Connected as " + irc.nick() + " in " + irc.channel() + " (" + irc.online() + " online)";
+            case CONNECTED -> "Connected as " + irc.nick() + " in " + irc.channel() + " (" + irc.online() + " online)"
+                    + (irc.inGuild() ? ", guild IRC: " + irc.guildOnline() + " online" : "");
             case CONNECTING -> "Connecting to " + IrcClient.SERVER + "...";
             case OFF -> "Off";
         };
         labels.add(new Label(status, left + 2, y));
         y += 12;
-        labels.add(new Label("Press [ or type /irc <message> to write.", left + 2, y));
+        labels.add(new Label("Press [ or type /irc <message> to write. Guild IRC: ] or /girc <message>.", left + 2, y));
         return y + 10;
     }
 
