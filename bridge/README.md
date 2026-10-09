@@ -41,4 +41,4 @@ When a player joins `#spotifychat`, the mod asks the bot to let them into their 
 
 Each guild's channel is made when its first member comes online and closed once it's been empty for 10 minutes, with a new random name every time. Leaving the guild gets you kicked within the hour (guild member lists are cached that long, as Hypixel's API policy asks). One guild's channel can be linked to a Discord channel (`GUILD_DISCORD_CHANNEL_ID` + `GUILD_HYPIXEL_NAME`).
 
-The API key stays on the server: the mod never sees it. Without a key the bot goes by the guild name the mod read in game (`/g online`, mod 1.5.0+). A modded client could claim any guild that way, so the linked guild, whose channel goes to Discord, also needs a Discord member with that Minecraft name and one of `GUILD_ROLES`.
+The API key stays on the server: the mod never sees it. Without a key the bot goes by the guild name the mod read in game (`/g online`, mod 1.5.0+); a modded client could claim any guild that way, so it's a stopgap until the key. Older mods don't send the guild name and only get into the linked guild, if a Discord member with that Minecraft name has one of `GUILD_ROLES`.

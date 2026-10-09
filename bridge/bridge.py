@@ -7,8 +7,9 @@ up the player's Hypixel guild, asks the mod to prove the name with Mojang (the s
 and invites it into that guild's channel. Leaving the guild gets you kicked. One guild's channel can also be
 linked to a Discord channel (GUILD_DISCORD_CHANNEL_ID + GUILD_HYPIXEL_NAME).
 
-Without a Hypixel API key the bot goes by the guild name the mod read in game (/g online). The linked guild
-still needs Discord roles too: GUILD_ROLES, which the guild's own bot hands out to real guild members.
+Without a Hypixel API key the bot goes by the guild name the mod read in game (/g online). Mods before 1.5.0
+don't send it; they only get into the linked guild, by Discord role: GUILD_ROLES, which the guild's own bot
+hands out to real guild members.
 
 Settings come from the environment (see spotify-chat-bridge.service):
   DISCORD_TOKEN             bot token (keep it in /etc/spotify-chat-bridge/token.env, never in git)
@@ -723,8 +724,8 @@ class Bridge(discord.Client):
                 log.error("can't see Discord channel %s: check the id and the bot's permissions", cid)
             else:
                 log.info("%s IRC <-> #%s in %s", name, channel.name, channel.guild.name)
-        log.info("guild IRC: %s", "Hypixel API" if self.hypixel else "guild names from the mod, Discord roles for "
-                 + (self.linked_guild or "the linked guild"))
+        log.info("guild IRC: %s", "Hypixel API" if self.hypixel
+                 else "guild names from the mod (Discord roles for mods before 1.5.0)")
 
     async def check_link(self):
         """Logs which Hypixel guild the Discord guild channel belongs to, to catch a typo in its name early
@@ -743,12 +744,13 @@ class Bridge(discord.Client):
         """The guild a Minecraft player is in, as (key, name), or None. CheckFailed when it can't tell right now.
 
         With an API key that's Hypixel's answer. Without one it's the guild name the mod read in game (claim):
-        good enough until the key comes, but a modded client could say anything, so the linked guild (whose
-        channel goes to Discord) also needs the Discord role. Mods before 1.5.0 send no claim and only get the
-        linked guild."""
+        good enough until the key comes, though a modded client could say anything. Mods before 1.5.0 send no
+        claim; they only get the linked guild, by Discord role."""
         if self.hypixel is None:
-            if claim is None or claim.lower() == self.linked_guild.lower():
+            if claim is None:
                 return (ROLE_GUILD, self.linked_guild or "the guild") if self.is_member(name) else None
+            if self.linked_guild and claim.lower() == self.linked_guild.lower():
+                return ROLE_GUILD, self.linked_guild  # the same channel as the Discord-role members
             return "claim:" + claim.lower(), claim
         if uuid is None:
             now = time.monotonic()
