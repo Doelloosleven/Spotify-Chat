@@ -71,6 +71,11 @@ public class ModConfig {
     public boolean guildIrcEnabled = true;
     /** Your Hypixel guild from the last /g online or /g list: null = not seen yet, "" = not in a guild */
     public String hypixelGuild = null;
+    /** GIFs and pictures linked in IRC (from Discord, Tenor or Giphy) shown in chat */
+    public boolean chatImages = true;
+    /** How tall they are, in chat lines */
+    public int chatImageLines = 6;
+    public static final int MIN_IMAGE_LINES = 3, MAX_IMAGE_LINES = 12;
 
     // ---- Updates
     /** Chat message when a newer version is on GitHub */

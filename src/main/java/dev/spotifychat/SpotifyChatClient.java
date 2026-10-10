@@ -643,13 +643,17 @@ public class SpotifyChatClient implements ClientModInitializer {
         if (!m.action()) line.append(Component.literal(": ").withStyle(ChatFormatting.GRAY));
         Matcher u = URL.matcher(m.text());
         int pos = 0;
+        String picture = null; // the first GIF / picture link: shown under the line
         while (u.find()) {
             line.append(Component.literal(m.text().substring(pos, u.start())).withStyle(ChatFormatting.WHITE));
             String url = u.group();
+            String kind = config.chatImages ? ChatImages.kind(url) : null;
             try {
                 URI uri = URI.create(url);
-                line.append(Component.literal(url).withStyle(style -> style.withColor(ChatFormatting.GREEN)
-                        .withUnderlined(true).withClickEvent(new ClickEvent.OpenUrl(uri))));
+                // Discord's links are long, and the picture itself shows below: just "[GIF]", still clickable
+                line.append(Component.literal(kind == null ? url : "[" + kind + "]").withStyle(style -> style
+                        .withColor(ChatFormatting.GREEN).withUnderlined(true).withClickEvent(new ClickEvent.OpenUrl(uri))));
+                if (kind != null && picture == null) picture = url;
             } catch (IllegalArgumentException e) {
                 line.append(Component.literal(url).withStyle(ChatFormatting.WHITE));
             }
@@ -657,6 +661,7 @@ public class SpotifyChatClient implements ClientModInitializer {
         }
         line.append(Component.literal(m.text().substring(pos)).withStyle(ChatFormatting.WHITE));
         Mc.chat().addClientSystemMessage(line);
+        if (picture != null) ChatImages.show(picture);
     }
 
     private void setJamLink(String text) {

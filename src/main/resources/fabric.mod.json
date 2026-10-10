@@ -12,6 +12,7 @@
     "client": ["dev.spotifychat.SpotifyChatClient"],
     "modmenu": ["dev.spotifychat.ModMenuIntegration"]
   },
+  "mixins": ["spotifychat.mixins.json"],
   "depends": {
     "fabricloader": ">=0.19.1",
     "minecraft": "${minecraft_dep}",

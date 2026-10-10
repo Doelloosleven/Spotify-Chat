@@ -251,6 +251,16 @@ public class SpotifyConfigScreen extends Screen {
                     cfg.guildIrcEnabled = v;
                     client.irc().setGuildEnabled(v);
                 });
+        y += step;
+        toggle(left, y, colW, rowH, "GIFs in chat",
+                "GIFs and pictures sent in IRC (from Discord, or Tenor / Giphy links) play right in chat. "
+                        + "They're only downloaded from Discord, Tenor and Giphy.",
+                () -> cfg.chatImages, v -> cfg.chatImages = v);
+        addRenderableWidget(new ValueSlider(right, y, colW, rowH, ModConfig.MAX_IMAGE_LINES - ModConfig.MIN_IMAGE_LINES,
+                "GIF size: 12 lines",
+                "How tall GIFs are in chat, in chat lines. Changes the next GIF.",
+                () -> cfg.chatImageLines - ModConfig.MIN_IMAGE_LINES, v -> cfg.chatImageLines = v + ModConfig.MIN_IMAGE_LINES,
+                v -> "GIF size: " + (v + ModConfig.MIN_IMAGE_LINES) + " lines"));
         y += step + 2;
         IrcClient irc = client.irc();
         String status = switch (irc.status()) {
