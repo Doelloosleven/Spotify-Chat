@@ -1,6 +1,6 @@
 # Discord bridge
 
-Links the in-game IRC (`#spotifychat` on Rizon) to `#irc` on the [Spotify Chat Discord](https://discord.gg/3pNGbfkVgJ), and runs a private IRC for every Hypixel guild. Tenor and Giphy links from Discord go to IRC as links to the GIF itself, so the mod can play them in chat. Runs on a small Linux server as a systemd service.
+Links the in-game IRC (`#spotifychat` on Rizon) to `#irc` on the [Spotify Chat Discord](https://discord.gg/3pNGbfkVgJ), and runs a private IRC for every Hypixel guild. Runs on a small Linux server as a systemd service.
 
 - `bridge.py`: the bot (Python 3.12, `discord.py`)
 - `spotify-chat-bridge.service`: systemd unit, reads `/etc/spotify-chat-bridge/bridge.env`, `token.env` and `hypixel.env`
@@ -13,7 +13,7 @@ Links the in-game IRC (`#spotifychat` on Rizon) to `#irc` on the [Spotify Chat D
 ```
 sudo apt install python3-venv
 sudo python3 -m venv /opt/spotify-chat-bridge/venv
-sudo /opt/spotify-chat-bridge/venv/bin/pip install "discord.py>=2.4,<3"
+sudo /opt/spotify-chat-bridge/venv/bin/pip install "discord.py>=2.4,<3" "pillow>=11"
 sudo install -m 644 bridge.py /opt/spotify-chat-bridge/
 sudo install -m 755 set-token.sh /usr/local/sbin/spotify-chat-bridge-token
 sudo install -m 644 spotify-chat-bridge.service /etc/systemd/system/
@@ -43,3 +43,12 @@ When a player joins `#spotifychat`, the mod asks the bot to let them into their 
 Each guild's channel is made when its first member comes online and closed once it's been empty for 10 minutes, with a new random name every time. Leaving the guild gets you kicked within the hour (guild member lists are cached that long, as Hypixel's API policy asks). One guild's channel can be linked to a Discord channel (`GUILD_DISCORD_CHANNEL_ID` + `GUILD_HYPIXEL_NAME`).
 
 The API key stays on the server: the mod never sees it. Without a key the bot goes by the guild name the mod read in game (`/g online`, mod 1.5.0+); a modded client could claim any guild that way, so it's a stopgap until the key. Older mods don't send the guild name and only get into the linked guild, if a Discord member with that Minecraft name has one of `GUILD_ROLES`.
+
+## GIFs
+
+The mod (1.6.0+) plays GIFs from IRC in chat, but only downloads from Discord, Tenor and Giphy. So the bot turns what people send on Discord into links like that:
+
+- Tenor and Giphy links become links to the small GIF file.
+- Klipy links (Discord's GIF button) and links to pictures on other sites: the bot takes the picture from Discord's preview, makes a small GIF of it and uploads it to a hidden `#gif-cache` channel it makes in the Spotify Chat server. Those uploads are deleted after a day.
+- Saved GIFs (Discord file links without a signature, which Discord won't serve anymore) get a fresh link.
+- Uploaded WebP pictures and GIFs over 2 MB are made small the same way.

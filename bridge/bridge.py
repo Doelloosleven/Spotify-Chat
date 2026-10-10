@@ -33,6 +33,7 @@ Settings come from the environment (see spotify-chat-bridge.service):
 import asyncio
 import hashlib
 import html
+import io
 import logging
 import os
 import random
@@ -42,10 +43,12 @@ import ssl
 import sys
 import time
 from datetime import timedelta
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import aiohttp
 import discord
+from discord.http import Route
+from PIL import Image, ImageSequence
 
 IRC_HOST = "irc.rizon.net"
 IRC_PORT = 6697
@@ -84,6 +87,20 @@ GIPHY = re.compile(r"https://(?:(?:www\.)?giphy\.com/(?:gifs|stickers)/(?:[\w-]*
 META_MEDIA = re.compile(r'<meta[^>]+(?:property|name)="(?:og:image|og:video|twitter:image|twitter:player:stream)"'
                         r'[^>]+content="([^"]+)"')
 TENOR_SMALL = "AAAAM"       # Tenor's "tinygif" (at most 220 px wide): small and the right size for chat
+# Discord file links people paste (saved GIFs) have no signature, and Discord answers those with 404
+DISCORD_FILE = re.compile(r"https://(?:cdn\.discordapp\.com|media\.discordapp\.net)/(?:ephemeral-)?attachments/"
+                          r"\d+/\d+/[^\s?#]+(?:\?\S*)?")
+# Links whose GIF only shows up in Discord's preview: Klipy (Discord's GIF button) and links to pictures
+NEEDS_PREVIEW = re.compile(r"https://(?:www\.)?klipy\.com/\S+|https://\S+\.(?:gif|png|jpe?g|webp)(?:[?#]\S*)?",
+                           re.IGNORECASE)
+# The bot downloads previews only from Discord's media proxy and these GIF sites, never from any link
+MEDIA_HOSTS = re.compile(r"(?:[\w-]+\.)*(?:discordapp\.net|discordapp\.com|klipy\.com|tenor\.com|giphy\.com)")
+PREVIEW_WAIT = 6            # seconds Discord gets to make the preview of a link
+GIF_CACHE_CHANNEL = "gif-cache"  # hidden channel the bot uploads the small GIFs to; the mod only loads from Discord
+GIF_CACHE_HOURS = 24        # Discord's file links stop working after about a day anyway
+GIF_HEIGHT, GIF_WIDTH, GIF_FRAMES = 160, 320, 150  # plenty for a GIF a few chat lines tall
+MAX_MEDIA_BYTES = 15 * 1024 * 1024
+BIG_ATTACHMENT = 2 * 1024 * 1024  # uploaded GIFs bigger than this are made small too (everyone in game downloads it)
 
 OPEN, GUILD_LINK = "open", "guild"  # Discord channel kinds; IRC targets are OPEN or a guild's key
 
@@ -105,8 +122,8 @@ def tenor_gif(media_url: str) -> str | None:
 gif_cache: dict[str, str | None] = {}
 
 
-async def gif_link(url: str, embeds: list[discord.Embed]) -> str | None:
-    """The GIF file behind a Tenor or Giphy link (what Discord's GIF picker sends), or None for other links."""
+async def gif_site_link(url: str, embeds: list[discord.Embed]) -> str | None:
+    """The GIF file behind a Tenor or Giphy link, or None for other links."""
     if m := GIPHY.match(url):
         return f"https://media.giphy.com/media/{m[1]}/200.gif"  # 200 px high
     if gif := tenor_gif(url):
@@ -126,7 +143,7 @@ async def gif_link(url: str, embeds: list[discord.Embed]) -> str | None:
                                          headers={"User-Agent": "Mozilla/5.0 (SpotifyChat bridge)"}) as s:
             async with s.get(url) as r:
                 if r.status == 200 and (r.url.host or "").endswith("tenor.com"):
-                    page = (await r.content.read(2_000_000)).decode("utf-8", "replace")
+                    page = ((await read_body(r, 2_000_000)) or b"").decode("utf-8", "replace")
                     gif = next((g for c in META_MEDIA.findall(page) if (g := tenor_gif(html.unescape(c)))), None)
     except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
         log.info("Tenor link not resolved (%s): %s", e, url)
@@ -136,11 +153,49 @@ async def gif_link(url: str, embeds: list[discord.Embed]) -> str | None:
     return gif
 
 
-async def with_gif_links(text: str, embeds: list[discord.Embed]) -> str:
-    for url in dict.fromkeys(LINK.findall(text)):
-        if gif := await gif_link(url, embeds):
-            text = text.replace(url, gif)
-    return text
+def small_gif(data: bytes) -> bytes | None:
+    """Any picture Pillow reads (animated WebP, GIF, PNG, JPEG) as a small looping GIF, or None."""
+    try:
+        with Image.open(io.BytesIO(data)) as im:
+            if im.width * im.height > 4096 * 4096:
+                return None
+            scale = min(1.0, GIF_HEIGHT / im.height, GIF_WIDTH / im.width)
+            size = (max(1, round(im.width * scale)), max(1, round(im.height * scale)))
+            frames, durations = [], []
+            for i, frame in enumerate(ImageSequence.Iterator(im)):
+                if i >= GIF_FRAMES:
+                    break
+                durations.append(int(frame.info.get("duration") or im.info.get("duration") or 100))
+                frames.append(frame.convert("RGBA").resize(size, Image.Resampling.LANCZOS))
+        out = io.BytesIO()
+        frames[0].save(out, "GIF", save_all=True, append_images=frames[1:], duration=durations, loop=0, disposal=2)
+        return out.getvalue()
+    except (OSError, ValueError, Image.DecompressionBombError, IndexError) as e:
+        log.info("couldn't make a GIF: %s", e)
+        return None
+
+
+async def read_body(r: aiohttp.ClientResponse, limit: int) -> bytes | None:
+    """The whole body, or None if it's bigger than limit (r.content.read(n) can stop after the first chunk)."""
+    chunks, size = [], 0
+    async for chunk in r.content.iter_chunked(65536):
+        size += len(chunk)
+        if size > limit:
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+async def download(url: str) -> bytes | None:
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as s:
+            async with s.get(url) as r:
+                if r.status != 200 or not MEDIA_HOSTS.fullmatch(r.url.host or ""):
+                    return None
+                return await read_body(r, MAX_MEDIA_BYTES)
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
+        log.info("download failed (%s): %s", e, url)
+        return None
 
 
 class CheckFailed(Exception):
@@ -692,6 +747,7 @@ class Bridge(discord.Client):
         self.member_role = extras.get("member_role", 0)
         self.member_count_channel = extras.get("member_count", 0)
         self.keep_days = extras.get("keep_days", 0)
+        self.small_gifs: dict[str, tuple[float, str]] = {}  # source -> (when, link to the small GIF)
         self.count_dirty = True
         self.irc = Irc(self.from_irc, self.guild_of)
 
@@ -702,8 +758,7 @@ class Bridge(discord.Client):
             self.release_task = asyncio.create_task(self.release_loop())
         if self.member_count_channel:
             self.count_task = asyncio.create_task(self.member_count_loop())
-        if self.keep_days:
-            self.cleanup_task = asyncio.create_task(self.cleanup_loop())
+        self.cleanup_task = asyncio.create_task(self.cleanup_loop())
         if self.hypixel and self.linked_guild:
             self.link_task = asyncio.create_task(self.check_link())
 
@@ -762,10 +817,18 @@ class Bridge(discord.Client):
         await self.wait_until_ready()
         while True:
             try:
-                await self.delete_old_messages()
+                if self.keep_days:
+                    await self.delete_old_messages()
+                await self.delete_old_gifs()
             except discord.HTTPException as e:
-                log.warning("deleting old IRC messages failed: %s", e)
+                log.warning("deleting old messages failed: %s", e)
             await asyncio.sleep(CLEANUP_EVERY)
+
+    async def delete_old_gifs(self):
+        channel = discord.utils.get(self.home().text_channels, name=GIF_CACHE_CHANNEL) if self.home() else None
+        if channel:
+            cutoff = discord.utils.utcnow() - timedelta(hours=GIF_CACHE_HOURS)
+            await channel.purge(limit=None, before=cutoff, reason="Small GIFs are only needed for a day")
 
     async def delete_old_messages(self):
         """Deletes what's older than IRC_KEEP_DAYS in the open IRC's Discord channel; pinned messages stay."""
@@ -917,6 +980,107 @@ class Bridge(discord.Client):
         except discord.HTTPException as e:
             log.warning("now playing post failed: %s", e)
 
+    # ---------------------------------------------------------------- GIFs for the in-game chat (mod 1.6.0+)
+
+    async def with_gif_links(self, message: discord.Message) -> str:
+        """The message text with every GIF / picture link swapped for one the mod can play."""
+        text = message.clean_content
+        links = list(dict.fromkeys(LINK.findall(text)))
+        for url in links:
+            if gif := await self.gif_link(url, message, alone=len(links) == 1):
+                text = text.replace(url, gif)
+        return text
+
+    async def gif_link(self, url: str, message: discord.Message, alone: bool) -> str | None:
+        if gif := await gif_site_link(url, message.embeds):  # Tenor, Giphy
+            return gif
+        if DISCORD_FILE.fullmatch(url):  # a saved GIF: the same file, with a fresh signature
+            return await self.signed(url)
+        if not NEEDS_PREVIEW.fullmatch(url):
+            return None
+        embed = await self.preview(message, url, alone)  # Klipy, links to pictures: Discord's preview has it
+        for media in (embed.image, embed.thumbnail) if embed else ():
+            if media and (media.url or media.proxy_url):
+                return await self.small_gif_link(media.url, media.proxy_url)
+        return None
+
+    async def attachment_link(self, a: discord.Attachment) -> str:
+        """Uploaded pictures go as they are, unless the mod can't read them (WebP) or they're big."""
+        kind = (a.content_type or "").split(";")[0]
+        if kind.startswith("image/") and (kind == "image/webp" or a.size > BIG_ATTACHMENT):
+            return await self.small_gif_link(a.url, a.proxy_url) or a.url
+        return a.url
+
+    async def preview(self, message: discord.Message, url: str, alone: bool) -> discord.Embed | None:
+        """Discord's preview of a link in the message. It's often added a moment after the message."""
+        def find(embeds):
+            return next((e for e in embeds if e.url == url), embeds[0] if alone and embeds else None)
+        for _ in range(PREVIEW_WAIT * 2):
+            if embed := find(message.embeds):  # discord.py updates the cached message when the preview comes
+                return embed
+            await asyncio.sleep(0.5)
+        try:
+            return find((await message.channel.fetch_message(message.id)).embeds)
+        except discord.HTTPException:
+            return None
+
+    async def signed(self, url: str) -> str | None:
+        # media.discordapp.net is Discord's resizing proxy and may hand out a still JPEG; cdn has the file itself
+        url = url.replace("https://media.discordapp.net/", "https://cdn.discordapp.com/", 1)
+        if "hm=" in url:
+            return url
+        try:
+            data = await self.http.request(Route("POST", "/attachments/refresh-urls"),
+                                           json={"attachment_urls": [url]})
+            return data["refreshed_urls"][0]["refreshed"]
+        except (discord.HTTPException, KeyError, IndexError, TypeError) as e:
+            log.info("couldn't refresh a Discord file link (%s): %s", e, url)
+            return None
+
+    async def small_gif_link(self, url: str | None, proxy_url: str | None) -> str | None:
+        """Makes a small GIF of the picture and uploads it to the hidden gif-cache channel: its Discord link."""
+        source = url or proxy_url
+        if (cached := self.small_gifs.get(source)) and time.time() - cached[0] < GIF_CACHE_HOURS * 3600 / 2:
+            return cached[1]
+        data = None
+        for candidate in (url, proxy_url):  # the original keeps animations; Discord's proxy may not
+            if candidate and MEDIA_HOSTS.fullmatch(urlsplit(candidate).hostname or ""):
+                if data := await download(candidate):
+                    break
+        gif = await asyncio.to_thread(small_gif, data) if data else None
+        channel = await self.gif_cache() if gif else None
+        if channel is None:
+            return None
+        try:
+            sent = await channel.send(file=discord.File(io.BytesIO(gif), filename="gif.gif"))
+        except discord.HTTPException as e:
+            log.warning("couldn't upload a GIF: %s", e)
+            return None
+        link = sent.attachments[0].url
+        if len(self.small_gifs) > 500:
+            self.small_gifs.clear()
+        self.small_gifs[source] = (time.time(), link)
+        return link
+
+    async def gif_cache(self) -> discord.TextChannel | None:
+        guild = self.home()
+        if guild is None:
+            return None
+        channel = discord.utils.get(guild.text_channels, name=GIF_CACHE_CHANNEL)
+        if channel:
+            return channel
+        try:
+            return await guild.create_text_channel(
+                GIF_CACHE_CHANNEL, position=len(guild.channels), reason="Small GIFs for the in-game chat",
+                topic=f"GIFs from Discord made small for the Spotify Chat mod. Deleted after {GIF_CACHE_HOURS} hours.",
+                overwrites={guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True,
+                                                                  attach_files=True, read_message_history=True,
+                                                                  manage_messages=True)})
+        except discord.HTTPException as e:
+            log.warning("couldn't make the %s channel: %s", GIF_CACHE_CHANNEL, e)
+            return None
+
     async def on_message(self, message: discord.Message):
         if message.author.bot or message.webhook_id:
             return
@@ -930,7 +1094,7 @@ class Bridge(discord.Client):
         else:
             return
         name = clean(message.author.display_name)[:32] or "someone"
-        parts = [await with_gif_links(message.clean_content, message.embeds)] + [a.url for a in message.attachments]
+        parts = [await self.with_gif_links(message)] + [await self.attachment_link(a) for a in message.attachments]
         lines = [clean(l) for p in parts for l in p.splitlines() if clean(l)]
         out = [piece for l in lines for piece in split_bytes(f"<{name}> {l}", MAX_TEXT_BYTES)]
         if len(out) > MAX_LINES_PER_MESSAGE:
