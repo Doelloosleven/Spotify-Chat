@@ -1,6 +1,6 @@
 # Discord bridge
 
-Links the in-game IRC (`#spotifychat` on Rizon) to `#irc` on the [Spotify Chat Discord](https://discord.gg/3pNGbfkVgJ), and runs a private IRC for every Hypixel guild. Runs on a small Linux server as a systemd service.
+Links the in-game IRC (`#spotifychat` on Rizon) to `#irc` on the [Spotify Chat Discord](https://discord.gg/3pNGbfkVgJ), and runs a private IRC for every Hypixel guild. Tenor and Giphy links from Discord go to IRC as links to the GIF itself, so the mod can play them in chat. Runs on a small Linux server as a systemd service.
 
 - `bridge.py`: the bot (Python 3.12, `discord.py`)
 - `spotify-chat-bridge.service`: systemd unit, reads `/etc/spotify-chat-bridge/bridge.env`, `token.env` and `hypixel.env`

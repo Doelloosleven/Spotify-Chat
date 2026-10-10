@@ -32,6 +32,7 @@ Settings come from the environment (see spotify-chat-bridge.service):
 """
 import asyncio
 import hashlib
+import html
 import logging
 import os
 import random
@@ -73,6 +74,16 @@ GITHUB_REPO = "Doelloosleven/Spotify-Chat"
 RELEASE_CHECK_EVERY = 900   # GitHub allows 60 requests an hour without a login
 JAR_NAME = re.compile(r"spotify-chat-[\w.]+\+([\w.]+)\.jar")
 NOW_PLAYING = re.compile(r"♫ Now playing: (.{1,300})")  # the mod's default song message
+# Tenor and Giphy links are sent to IRC as links to the GIF file itself, which the mod (1.6.0+) plays in chat
+LINK = re.compile(r"https?://[^\s<>]+")
+TENOR_MEDIA = re.compile(r"https://(?:media\d*|c)\.tenor\.com/(?:m/)?([A-Za-z0-9_-]{11})[A-Za-z0-9]{5}/"
+                         r"([A-Za-z0-9_-]{1,100})\.(?:gif|mp4|webm|webp|png)")
+TENOR_PAGE = re.compile(r"https://(?:www\.)?tenor\.com/\S+")
+GIPHY = re.compile(r"https://(?:(?:www\.)?giphy\.com/(?:gifs|stickers)/(?:[\w-]*-)?|(?:media\d*|i)\.giphy\.com/"
+                   r"(?:media/)?(?:v1\.[\w-]+/)?)([A-Za-z0-9]{8,40})(?![\w-])")
+META_MEDIA = re.compile(r'<meta[^>]+(?:property|name)="(?:og:image|og:video|twitter:image|twitter:player:stream)"'
+                        r'[^>]+content="([^"]+)"')
+TENOR_SMALL = "AAAAM"       # Tenor's "tinygif" (at most 220 px wide): small and the right size for chat
 
 OPEN, GUILD_LINK = "open", "guild"  # Discord channel kinds; IRC targets are OPEN or a guild's key
 
@@ -83,6 +94,53 @@ CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 MC_NAME = re.compile(r"[A-Za-z0-9_]{1,16}")
 GUILD_NAME = re.compile(r"[A-Za-z0-9_ ]{1,32}")
 UUID = re.compile(r"[0-9a-f]{32}")
+
+
+def tenor_gif(media_url: str) -> str | None:
+    """Tenor's small GIF for any of its media links (mp4, webp, big gif...), or None."""
+    m = TENOR_MEDIA.match(media_url)
+    return f"https://media.tenor.com/{m[1]}{TENOR_SMALL}/{m[2]}.gif" if m else None
+
+
+gif_cache: dict[str, str | None] = {}
+
+
+async def gif_link(url: str, embeds: list[discord.Embed]) -> str | None:
+    """The GIF file behind a Tenor or Giphy link (what Discord's GIF picker sends), or None for other links."""
+    if m := GIPHY.match(url):
+        return f"https://media.giphy.com/media/{m[1]}/200.gif"  # 200 px high
+    if gif := tenor_gif(url):
+        return gif
+    if not TENOR_PAGE.match(url):
+        return None
+    for e in embeds:  # Discord's preview, if it's there already, has the media link
+        if e.url == url:
+            for media in (e.video, e.thumbnail, e.image):
+                if media and media.url and (gif := tenor_gif(media.url)):
+                    return gif
+    if url in gif_cache:
+        return gif_cache[url]
+    gif = None
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8),
+                                         headers={"User-Agent": "Mozilla/5.0 (SpotifyChat bridge)"}) as s:
+            async with s.get(url) as r:
+                if r.status == 200 and (r.url.host or "").endswith("tenor.com"):
+                    page = (await r.content.read(2_000_000)).decode("utf-8", "replace")
+                    gif = next((g for c in META_MEDIA.findall(page) if (g := tenor_gif(html.unescape(c)))), None)
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
+        log.info("Tenor link not resolved (%s): %s", e, url)
+    if len(gif_cache) > 500:
+        gif_cache.clear()
+    gif_cache[url] = gif
+    return gif
+
+
+async def with_gif_links(text: str, embeds: list[discord.Embed]) -> str:
+    for url in dict.fromkeys(LINK.findall(text)):
+        if gif := await gif_link(url, embeds):
+            text = text.replace(url, gif)
+    return text
 
 
 class CheckFailed(Exception):
@@ -872,7 +930,7 @@ class Bridge(discord.Client):
         else:
             return
         name = clean(message.author.display_name)[:32] or "someone"
-        parts = [message.clean_content] + [a.url for a in message.attachments]
+        parts = [await with_gif_links(message.clean_content, message.embeds)] + [a.url for a in message.attachments]
         lines = [clean(l) for p in parts for l in p.splitlines() if clean(l)]
         out = [piece for l in lines for piece in split_bytes(f"<{name}> {l}", MAX_TEXT_BYTES)]
         if len(out) > MAX_LINES_PER_MESSAGE:
