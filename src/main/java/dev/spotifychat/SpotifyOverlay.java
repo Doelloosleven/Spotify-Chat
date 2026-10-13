@@ -92,7 +92,7 @@ public class SpotifyOverlay implements HudElement {
     /** The lyrics line to show now ("" between lines), or null when there's no lyrics row */
     static String lyric(SpotifyClient.Track t, ModConfig cfg) {
         if (!cfg.overlayLyrics) return null;
-        List<Lyrics.Line> lines = Lyrics.get(t);
+        List<Lyrics.Line> lines = Lyrics.get(t, PlaybackClock.length(t.song()));
         if (lines == null) return null;
         long at = PlaybackClock.position(t, System.currentTimeMillis());
         if (at < 0) return null; // don't know where in the song Spotify is

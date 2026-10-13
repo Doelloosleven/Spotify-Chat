@@ -167,31 +167,44 @@ public final class LocalSpotify {
                 "-e", "tell application \"Spotify\"",
                 "-e", "if player state is not stopped then return (name of current track) & linefeed & "
                         + "(artist of current track) & linefeed & (album of current track) & linefeed & "
-                        + "(player state as string) & linefeed & (player position as string)",
+                        + "(player state as string) & linefeed & (player position as string) & linefeed & "
+                        + "(duration of current track as string)",
                 "-e", "end tell",
                 "-e", "end if");
-        return parseLines(out, "playing", 1000); // position in seconds
+        return parseLines(out, "playing", 1000, 1); // position in seconds, length in ms
     }
 
     // ---------------------------------------------------------------- Linux
 
     private static Optional<SpotifyClient.Track> linux() throws IOException, InterruptedException {
         return parseLines(run("playerctl", "-p", "spotify", "metadata",
-                "--format", "{{title}}\n{{artist}}\n{{album}}\n{{status}}\n{{position}}"), "Playing", 0.001); // µs
+                "--format", "{{title}}\n{{artist}}\n{{album}}\n{{status}}\n{{position}}\n{{mpris:length}}"),
+                "Playing", 0.001, 0.001); // both in microseconds
     }
 
     // -------------------------------------------------------------- helpers
 
-    /** Lines: song, artist, album, state, position (msPerUnit: milliseconds per unit of the position) */
-    static Optional<SpotifyClient.Track> parseLines(String out, String playingState, double msPerUnit) {
+    /**
+     * Lines: song, artist, album, state, position, length. msPerPosition / msPerLength: milliseconds per unit
+     * of those two (they're for the lyrics).
+     */
+    static Optional<SpotifyClient.Track> parseLines(String out, String playingState, double msPerPosition,
+                                                    double msPerLength) {
         String[] lines = out.strip().split("\n");
         if (lines.length < 4 || lines[0].isBlank()) return Optional.empty();
         boolean playing = lines[3].trim().equalsIgnoreCase(playingState);
         if (lines.length > 4) {
             try { // some languages write "12,5" for 12.5
                 double position = Double.parseDouble(lines[4].trim().replace(',', '.'));
-                PlaybackClock.report(lines[0].trim(), Math.round(position * msPerUnit), System.currentTimeMillis(),
-                        playing, PlaybackClock.PLAYER);
+                long length = 0;
+                if (lines.length > 5) {
+                    try {
+                        length = Math.round(Double.parseDouble(lines[5].trim().replace(',', '.')) * msPerLength);
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+                PlaybackClock.reportPlayer(lines[0].trim(), Math.round(position * msPerPosition), System.currentTimeMillis(),
+                        playing, length);
             } catch (NumberFormatException ignored) {
             }
         }

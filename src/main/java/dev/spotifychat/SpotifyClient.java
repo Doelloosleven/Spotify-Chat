@@ -369,8 +369,9 @@ public class SpotifyClient {
         // "timestamp" = when the playback state last changed, so while paused it's when the pause started
         long changedAt = root.has("timestamp") ? root.get("timestamp").getAsLong() : 0;
         if (root.has("progress_ms") && !root.get("progress_ms").isJsonNull()) { // for the lyrics
-            PlaybackClock.report(song, root.get("progress_ms").getAsLong(), System.currentTimeMillis(), playing,
-                    PlaybackClock.PLAYER);
+            long length = item.has("duration_ms") && !item.get("duration_ms").isJsonNull()
+                    ? item.get("duration_ms").getAsLong() : 0;
+            PlaybackClock.reportPlayer(song, root.get("progress_ms").getAsLong(), System.currentTimeMillis(), playing, length);
         }
         return Optional.of(new Track(song, names, album, playing, playing ? 0 : changedAt, cover));
     }

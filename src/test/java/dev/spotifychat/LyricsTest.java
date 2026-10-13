@@ -46,18 +46,28 @@ class LyricsTest {
         assertEquals(-1, Lyrics.indexAt(List.of(), 5));
     }
 
+    /** Versions of one song like LRCLIB has them: a radio edit, the album version twice, a sped up one */
+    private static final String VERSIONS = """
+            [{"id":1,"trackName":"Song","artistName":"The Band","duration":146.0,"syncedLyrics":"[00:01.00] radio edit"},
+             {"id":2,"trackName":"Song","artistName":"The Band","duration":157.0,"syncedLyrics":"[00:01.00] album"},
+             {"id":3,"trackName":"Song","artistName":"The Band","duration":157.4,"syncedLyrics":"[00:01.00] album too"},
+             {"id":4,"trackName":"Song (Sped Up)","artistName":"Somebody","duration":120.0,"syncedLyrics":"[00:01.00] sped up"},
+             {"id":5,"trackName":"Song","artistName":"The Band","instrumental":true,"duration":157.0,"syncedLyrics":null},
+             {"id":6,"trackName":"Song","artistName":"The Band","duration":157.0,"syncedLyrics":null,"plainLyrics":"no times"},
+             {"id":7,"trackName":"Song","artistName":"The Band","duration":null,"syncedLyrics":"[00:01.00] no length"}]""";
+
     @Test
-    void picksTheBestSearchResult() {
-        String json = """
-                [{"trackName":"Song","artistName":"Someone Else","syncedLyrics":"[00:01.00] wrong artist"},
-                 {"trackName":"Song","artistName":"The Band","instrumental":true,"syncedLyrics":null},
-                 {"trackName":"Song (Live)","artistName":"The Band","syncedLyrics":"[00:01.00] live"},
-                 {"trackName":"Song","artistName":"The Band feat. X","syncedLyrics":"[00:01.00] right"},
-                 {"trackName":"Song","artistName":"The Band","syncedLyrics":null,"plainLyrics":"no times"}]""";
-        List<Lyrics.Line> lines = Lyrics.pick(JsonParser.parseString(json), "Song", "The Band");
-        assertEquals("right", lines.getFirst().text());
-        assertTrue(Lyrics.pick(JsonParser.parseString("[]"), "Song", "The Band").isEmpty());
-        assertTrue(Lyrics.pick(JsonParser.parseString("{\"error\":1}"), "Song", "The Band").isEmpty());
+    void picksTheVersionAsLongAsTheSong() {
+        List<Lyrics.Version> versions = Lyrics.versions(JsonParser.parseString(VERSIONS), "Song", "The Band");
+        assertEquals(5, versions.size()); // instrumental and unsynced ones are left out
+        assertEquals("album", Lyrics.choose(versions, 157_169).getFirst().text());
+        assertEquals("radio edit", Lyrics.choose(versions, 146_500).getFirst().text());
+        assertEquals("sped up", Lyrics.choose(versions, 121_000).getFirst().text());
+        assertNull(Lyrics.choose(versions, 200_000)); // no version fits: nothing beats lyrics at the wrong time
+        // Length unknown: the length most versions have
+        assertEquals("album", Lyrics.choose(versions, 0).getFirst().text());
+        assertNull(Lyrics.choose(List.of(), 157_000));
+        assertTrue(Lyrics.versions(JsonParser.parseString("{\"error\":1}"), "Song", "The Band").isEmpty());
     }
 
     @Test
@@ -85,6 +95,15 @@ class LyricsTest {
     }
 
     @Test
+    void remembersHowLongTheSongIs() {
+        PlaybackClock.reportPlayer("Song", 1_000, 0, true, 157_169);
+        assertEquals(157_169, PlaybackClock.length("song"));
+        assertEquals(0, PlaybackClock.length("Another song"));
+        PlaybackClock.reportPlayer("Another song", 1_000, 0, true, 0); // a reading without a length keeps the old one
+        assertEquals(157_169, PlaybackClock.length("Song"));
+    }
+
+    @Test
     void guessNeverOverridesARealReading() {
         PlaybackClock.seen("A", true, 0);
         PlaybackClock.report("B", 90_000, 2_000, true, PlaybackClock.PLAYER, 2_000);
@@ -96,7 +115,7 @@ class LyricsTest {
     void readsWindowsMediaControls() {
         long now = System.currentTimeMillis();
         WindowsMediaSession.Reading r = WindowsMediaSession.parse("S\tBlinding Lights\t42000\t" + now + "\t200000\tPlaying");
-        assertEquals(new WindowsMediaSession.Reading("Blinding Lights", 42_000, now, true), r);
+        assertEquals(new WindowsMediaSession.Reading("Blinding Lights", 42_000, now, true, 200_000), r);
         assertFalse(WindowsMediaSession.parse("S\tSong\t0\t" + now + "\t200000\tPaused").playing());
         assertNull(WindowsMediaSession.parse("N"));
         assertNull(WindowsMediaSession.parse("S\tSong\t0\t" + now + "\t0\tPaused")); // no timeline: Spotify paused

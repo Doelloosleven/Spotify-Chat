@@ -24,6 +24,9 @@ public final class PlaybackClock {
     record Sample(String song, long positionMs, long atMs, boolean playing, int quality, long receivedAt) {}
 
     private static volatile Sample sample;
+    /** How long the song is (from players that say), to pick the lyrics made for this exact version */
+    private static volatile String lengthSong = "";
+    private static volatile long lengthMs;
     // What the guess last saw (only touched while holding the class lock)
     private static String seenSong;
     private static boolean seenPlaying;
@@ -46,6 +49,20 @@ public final class PlaybackClock {
 
     public static void report(String song, long positionMs, long atMs, boolean playing, int quality) {
         report(song, positionMs, atMs, playing, quality, System.currentTimeMillis());
+    }
+
+    /** A player's reading that also says how long the song is (0 = it doesn't) */
+    public static void reportPlayer(String song, long positionMs, long atMs, boolean playing, long songLengthMs) {
+        if (songLengthMs > 0) {
+            lengthMs = songLengthMs;
+            lengthSong = key(song);
+        }
+        report(song, positionMs, atMs, playing, PLAYER, System.currentTimeMillis());
+    }
+
+    /** How long this song is in ms, 0 = unknown */
+    public static long length(String song) {
+        return key(song).equals(lengthSong) ? lengthMs : 0;
     }
 
     /**
@@ -86,6 +103,8 @@ public final class PlaybackClock {
     /** For tests */
     static synchronized void reset() {
         sample = null;
+        lengthSong = "";
+        lengthMs = 0;
         seenSong = null;
         seenPlaying = false;
         seenAt = 0;

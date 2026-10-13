@@ -23,13 +23,15 @@ final class WindowsMediaSession {
             $mgr = Await ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
             $props = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties]
             while (Get-Process -Id PARENT -ErrorAction SilentlyContinue) {
-              $s = $mgr.GetSessions() | Where-Object { $_.SourceAppUserModelId -like '*Spotify*' } | Select-Object -First 1
-              if ($s) {
-                $t = $s.GetTimelineProperties(); $p = $s.GetPlaybackInfo(); $m = Await ($s.TryGetMediaPropertiesAsync()) $props
-                $title = ($m.Title -replace '[\\t\\r\\n]', ' ')
-                [Console]::Out.WriteLine('S' + "`t" + $title + "`t" + [long]$t.Position.TotalMilliseconds + "`t" + $t.LastUpdatedTime.ToUnixTimeMilliseconds() + "`t" + [long]$t.EndTime.TotalMilliseconds + "`t" + $p.PlaybackStatus)
-              } else { [Console]::Out.WriteLine('N') }
-              [Console]::Out.Flush()
+              try {
+                $s = $mgr.GetSessions() | Where-Object { $_.SourceAppUserModelId -like '*Spotify*' } | Select-Object -First 1
+                if ($s) {
+                  $t = $s.GetTimelineProperties(); $p = $s.GetPlaybackInfo(); $m = Await ($s.TryGetMediaPropertiesAsync()) $props
+                  $title = ($m.Title -replace '[\\t\\r\\n]', ' ')
+                  [Console]::Out.WriteLine('S' + "`t" + $title + "`t" + [long]$t.Position.TotalMilliseconds + "`t" + $t.LastUpdatedTime.ToUnixTimeMilliseconds() + "`t" + [long]$t.EndTime.TotalMilliseconds + "`t" + $p.PlaybackStatus)
+                } else { [Console]::Out.WriteLine('N') }
+                [Console]::Out.Flush()
+              } catch { } # e.g. the song changed halfway through reading it: just read again
               Start-Sleep -Milliseconds 1000
             }
             """;
@@ -69,7 +71,7 @@ final class WindowsMediaSession {
             String line;
             while ((line = in.readLine()) != null) {
                 Reading r = parse(line);
-                if (r != null) PlaybackClock.report(r.title(), r.positionMs(), r.atMs(), r.playing(), PlaybackClock.PLAYER);
+                if (r != null) PlaybackClock.reportPlayer(r.title(), r.positionMs(), r.atMs(), r.playing(), r.lengthMs());
             }
         } catch (Exception ignored) {
         } finally {
@@ -77,7 +79,7 @@ final class WindowsMediaSession {
         }
     }
 
-    record Reading(String title, long positionMs, long atMs, boolean playing) {}
+    record Reading(String title, long positionMs, long atMs, boolean playing, long lengthMs) {}
 
     /** "S<tab>title<tab>position<tab>updated at<tab>length<tab>status", or null if it says nothing useful */
     static Reading parse(String line) {
@@ -89,7 +91,7 @@ final class WindowsMediaSession {
             if (length <= 0 || position < 0 || at <= 0) return null; // Spotify didn't fill in the timeline
             long now = System.currentTimeMillis();
             if (playing && position + (now - at) > length + 5_000) return null; // stale: can't be right
-            return new Reading(f[1].trim(), position, at, playing);
+            return new Reading(f[1].trim(), position, at, playing, length);
         } catch (NumberFormatException e) {
             return null;
         }
