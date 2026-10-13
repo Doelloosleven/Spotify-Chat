@@ -280,7 +280,7 @@ public class SpotifyClient {
 
     private Queued addToQueue(String search) throws IOException, InterruptedException {
         HttpResponse<String> found = http.send(HttpRequest.newBuilder(URI.create(
-                        "https://api.spotify.com/v1/search?type=track&limit=1&market=from_token&q=" + enc(search)))
+                        "https://api.spotify.com/v1/search?type=track&limit=1&q=" + enc(search)))
                 .timeout(Duration.ofSeconds(10))
                 .header("Authorization", "Bearer " + getAccessToken())
                 .GET().build(), HttpResponse.BodyHandlers.ofString());
@@ -288,7 +288,9 @@ public class SpotifyClient {
             synchronized (this) { accessToken = null; }
             throw new IOException("Spotify rejected the login, try /spotify login again");
         }
-        if (found.statusCode() != 200) throw new IOException("Spotify search failed (" + found.statusCode() + ")");
+        if (found.statusCode() != 200) {
+            throw new IOException("Spotify search failed (" + found.statusCode() + reason(found.body()) + ")");
+        }
         JsonArray items = JsonParser.parseString(found.body()).getAsJsonObject()
                 .getAsJsonObject("tracks").getAsJsonArray("items");
         if (items.isEmpty()) throw new IOException("Spotify found nothing for \"" + search + "\"");
@@ -309,7 +311,18 @@ public class SpotifyClient {
         if (body.contains("premium")) throw new IOException("Adding to the queue needs Spotify Premium");
         if (code == 404) throw new IOException("Start playing something in Spotify first (it needs an active device)");
         if (code == 429) throw new IOException("Too many requests, wait a moment");
-        throw new IOException("Spotify error " + code);
+        throw new IOException("Spotify error " + code + reason(res.body()));
+    }
+
+    /** ": <Spotify's own explanation>" from an error answer, or "" */
+    static String reason(String body) {
+        try {
+            JsonObject error = JsonParser.parseString(body).getAsJsonObject().getAsJsonObject("error");
+            String message = str(error, "message");
+            return message.isBlank() ? "" : ": " + message.substring(0, Math.min(150, message.length()));
+        } catch (RuntimeException e) {
+            return "";
+        }
     }
 
     // ---------------------------------------------------------- now playing
