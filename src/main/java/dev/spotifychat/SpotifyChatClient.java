@@ -931,8 +931,10 @@ public class SpotifyChatClient implements ClientModInitializer {
 
     /** Every half second: what the overlay should show. Never waits for the network. */
     private void updateOverlay() {
-        // Windows: where Spotify is in the song comes from the media controls, only needed for the lyrics
-        WindowsMediaSession.want(Util.getPlatform() == Util.OS.WINDOWS && config.overlayEnabled && config.overlayLyrics);
+        // Windows: the media controls say where Spotify is in the song (lyrics) and have Spotify's own cover,
+        // asked only for the lyrics or once the online lookups missed a cover
+        boolean windows = Util.getPlatform() == Util.OS.WINDOWS;
+        WindowsMediaSession.want(windows && config.overlayEnabled && (config.overlayLyrics || appCovers));
         if (!config.overlayEnabled) {
             overlayTrack = null;
             return;
@@ -957,8 +959,20 @@ public class SpotifyChatClient implements ClientModInitializer {
             return;
         }
         TrackInfoLookup.Info info = needsInfo(t) ? TrackInfoLookup.peek(t.artist(), t.song()) : null;
-        overlayTrack = info == null ? t : withInfo(t, info);
+        if (info != null) t = withInfo(t, info);
+        if (windows && config.overlayShowCover) {
+            String appCover = WindowsMediaSession.coverUrl(t.song());
+            if (appCover != null) {
+                t = t.withInfo(t.album(), t.artists(), appCover); // Spotify's own: always the right one
+            } else if (info != null && t.coverUrl().isBlank()) {
+                appCovers = true; // looked up, no cover found: ask Spotify from now on
+            }
+        }
+        overlayTrack = t;
     }
+
+    /** Windows: the online lookups missed a cover once, so Spotify's own covers are read from now on */
+    private boolean appCovers;
 
     private boolean showTriggerPublicly() {
         return config.publicMessages && config.showTrigger;

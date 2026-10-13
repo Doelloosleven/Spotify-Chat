@@ -46,6 +46,9 @@ public final class CoverTextures {
     private static String requestedUrl = "";
     private static String readyUrl = "";
     private static String failedUrl = "";
+    private static long failedAt;
+    /** A cover that didn't download (no internet for a moment) is tried again after this */
+    private static final long RETRY_MS = 30_000;
     private static Identifier readyId;
     private static CoverColors.Palette readyPalette;
     private static int counter;
@@ -53,12 +56,19 @@ public final class CoverTextures {
     /** Render thread. The texture for this cover if it's loaded; otherwise starts loading it and returns null. */
     public static Identifier get(String url) {
         if (url == null || url.isBlank()) return null;
+        if (url.equals(failedUrl) && System.currentTimeMillis() - failedAt > RETRY_MS) {
+            failedUrl = "";
+            requestedUrl = ""; // try again
+        }
         if (!url.equals(requestedUrl)) {
             requestedUrl = url;
             CompletableFuture.supplyAsync(() -> download(url)).whenComplete((pixels, err) -> {
                 if (err != null || pixels == null) {
                     SpotifyChatClient.LOGGER.debug("Cover download failed: {}", url, err);
-                    Minecraft.getInstance().execute(() -> failedUrl = url);
+                    Minecraft.getInstance().execute(() -> {
+                        failedUrl = url;
+                        failedAt = System.currentTimeMillis();
+                    });
                     return;
                 }
                 Minecraft.getInstance().execute(() -> install(url, pixels));
@@ -80,12 +90,17 @@ public final class CoverTextures {
 
     private static Pixels download(String url) {
         try {
-            HttpRequest req = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(8)).GET().build();
-            HttpResponse<InputStream> res = HTTP.send(req, HttpResponse.BodyHandlers.ofInputStream());
             byte[] bytes;
-            try (InputStream in = res.body()) {
-                if (res.statusCode() != 200) return null;
-                bytes = in.readNBytes(MAX_BYTES + 1); // never more than this in memory
+            if (url.startsWith(WindowsMediaSession.COVER_PREFIX)) {
+                bytes = WindowsMediaSession.coverBytes(url); // Spotify's own cover, already on this PC
+                if (bytes == null) return null;
+            } else {
+                HttpRequest req = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(8)).GET().build();
+                HttpResponse<InputStream> res = HTTP.send(req, HttpResponse.BodyHandlers.ofInputStream());
+                try (InputStream in = res.body()) {
+                    if (res.statusCode() != 200) return null;
+                    bytes = in.readNBytes(MAX_BYTES + 1); // never more than this in memory
+                }
             }
             if (bytes.length > MAX_BYTES) return null;
             BufferedImage src = decode(bytes);
