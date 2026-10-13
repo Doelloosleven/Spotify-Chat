@@ -134,5 +134,14 @@ class LyricsTest {
         assertFalse(SpotifyChatClient.QUEUE.matcher("!queue").matches());
         assertFalse(SpotifyChatClient.QUEUE.matcher("!queue   ").matches());
         assertFalse(SpotifyChatClient.QUEUE.matcher("!queue " + "a".repeat(121)).matches()); // fits an IRC line
+
+        // The same in Hypixel guild / party / co-op chat
+        Matcher g = SpotifyChatClient.CHANNEL_QUEUE.matcher("Guild > [MVP++] Doelloosleven [Admin]: !queue ggz");
+        assertTrue(g.matches());
+        assertEquals("Doelloosleven", g.group(2));
+        assertEquals("!queue ggz", g.group(3));
+        assertTrue(SpotifyChatClient.CHANNEL_QUEUE.matcher("Party > Doelvolleven: !queue Blinding Lights").matches());
+        assertFalse(SpotifyChatClient.CHANNEL_QUEUE.matcher("Guild > [MVP++] Doelloosleven [Admin]: !queue").matches());
+        assertFalse(SpotifyChatClient.CHANNEL_QUEUE.matcher("[MVP+] Someone: !queue in all chat").matches());
     }
 }
