@@ -781,17 +781,41 @@ public class SpotifyChatClient implements ClientModInitializer {
             info("Skipped " + r.from() + "'s request.", ChatFormatting.GRAY);
             return;
         }
+        queueSong(r, true);
+    }
+
+    /**
+     * Adds the request's song to your Spotify queue. Only Spotify's Web API can do that, so without its
+     * login this logs you in first (once, in the browser) and then adds it. mayLogin: false after a login,
+     * so a login that still can't queue doesn't loop.
+     */
+    private void queueSong(SongRequest r, boolean mayLogin) {
         if (!spotify.isLoggedIn()) {
-            // Without the Web API login the mod can't touch your queue: open the search in Spotify instead
-            openSpotifySearch(r.song());
-            info("Spotify is open on the search: right-click the song > Add to queue. Log in once with "
-                    + "/spotify login (Settings > Phone / web player) and [Queue it] adds it by itself.",
-                    ChatFormatting.YELLOW);
+            if (config.clientId.isBlank() || !mayLogin) {
+                // No Spotify app set up for the login: the best we can do is the search
+                openSpotifySearch(r.song());
+                info("Spotify is open on the search: right-click the song > Add to queue. For the mod to add "
+                        + "songs by itself, set up the phone / web player once (/spotify login shows how).",
+                        ChatFormatting.YELLOW);
+                return;
+            }
+            info("Adding songs to your queue needs a Spotify login, once. Click Agree in your browser and "
+                    + r.song() + " is added right after.", ChatFormatting.YELLOW);
+            loginAndQueue(r);
             return;
         }
         info("Adding " + r.song() + " to your queue...", ChatFormatting.GRAY);
         spotify.queue(r.song()).whenComplete((queued, err) -> runOnGame(() -> {
             if (err != null) {
+                Throwable cause = err;
+                while (cause.getCause() != null && cause.getCause() != cause) cause = cause.getCause();
+                if (cause instanceof SpotifyClient.MissingPermission && mayLogin) {
+                    // Logged in before 1.7.0: the login is missing the queue permission. Log in again, once.
+                    info("Your Spotify login is from before song requests. Click Agree in your browser once more "
+                            + "and " + r.song() + " is added right after.", ChatFormatting.YELLOW);
+                    loginAndQueue(r);
+                    return;
+                }
                 info("Couldn't queue it: " + rootMessage(err), ChatFormatting.RED);
                 return;
             }
@@ -801,6 +825,14 @@ public class SpotifyChatClient implements ClientModInitializer {
                 sendIrcTarget(r.target(), "♫ Queued " + song + " (asked by " + r.from() + ")");
             }
         }));
+    }
+
+    private void loginAndQueue(SongRequest r) {
+        try {
+            loginThen(() -> queueSong(r, false));
+        } catch (Exception e) {
+            info("Couldn't open the Spotify login: " + rootMessage(e), ChatFormatting.RED);
+        }
     }
 
     /** The search in the Spotify app (spotify: link); in the browser if that doesn't open */
@@ -1101,6 +1133,20 @@ public class SpotifyChatClient implements ClientModInitializer {
     }
 
     public void login() throws Exception {
+        loginThen(null);
+    }
+
+    /** Waiting for the login that's open in the browser, to run once it's done (game thread only) */
+    private final List<Runnable> afterLogin = new ArrayList<>();
+    private boolean loggingIn;
+
+    /** Logs in to the Web API, then runs after (if not null). A second call during a login just waits for it. */
+    private void loginThen(Runnable after) throws Exception {
+        if (after != null) afterLogin.add(after);
+        if (loggingIn) {
+            info("Finish the Spotify login in your browser first.", ChatFormatting.YELLOW);
+            return;
+        }
         if (config.clientId.isBlank()) {
             info("You don't need to log in: !spotify already works with the Spotify app on this PC.",
                     ChatFormatting.GREEN);
@@ -1112,11 +1158,17 @@ public class SpotifyChatClient implements ClientModInitializer {
             return;
         }
         SpotifyClient.LoginSession session = spotify.startLogin();
+        loggingIn = true;
         info("Opening Spotify login in your browser...", ChatFormatting.GREEN);
         openInBrowser(session.url(), "Click here if the login page didn't open");
         session.result().whenComplete((v, err) -> runOnGame(() -> {
+            loggingIn = false;
+            List<Runnable> waiting = new ArrayList<>(afterLogin);
+            afterLogin.clear();
             if (err == null) {
-                info("Spotify connected! Type !spotify to share your song.", ChatFormatting.GREEN);
+                info("Spotify connected!" + (waiting.isEmpty() ? " Type !spotify to share your song." : ""),
+                        ChatFormatting.GREEN);
+                waiting.forEach(Runnable::run);
             } else {
                 info("Spotify login failed: " + rootMessage(err), ChatFormatting.RED);
             }

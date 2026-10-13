@@ -260,6 +260,13 @@ public class SpotifyClient {
     /** The song a request ended up as */
     public record Queued(String song, String artist) {}
 
+    /** The login is from before song requests and lacks the permission to change the queue */
+    public static final class MissingPermission extends IOException {
+        MissingPermission() {
+            super("Song requests need one more permission: type /spotify login once more");
+        }
+    }
+
     /** Off the game thread: finds the best match for the search on Spotify and adds it to your queue. */
     public CompletableFuture<Queued> queue(String search) {
         return CompletableFuture.supplyAsync(() -> {
@@ -298,9 +305,7 @@ public class SpotifyClient {
         int code = res.statusCode();
         String body = res.body().toLowerCase(java.util.Locale.ROOT);
         if (code == 200 || code == 204) return queued;
-        if (body.contains("scope") || body.contains("permissions missing")) {
-            throw new IOException("Song requests need one more permission: type /spotify login once more");
-        }
+        if (body.contains("scope") || body.contains("permissions missing")) throw new MissingPermission();
         if (body.contains("premium")) throw new IOException("Adding to the queue needs Spotify Premium");
         if (code == 404) throw new IOException("Start playing something in Spotify first (it needs an active device)");
         if (code == 429) throw new IOException("Too many requests, wait a moment");
