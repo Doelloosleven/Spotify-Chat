@@ -3,7 +3,7 @@
   "minVersion": "0.8",
   "package": "dev.spotifychat.mixin",
   "compatibilityLevel": "JAVA_25",
-  "client": ["ChatLineMixin"],
+  "client": ["ChatLineMixin", "ChatSuggestionsMixin"],
   "injectors": {
     "defaultRequire": 0
   }

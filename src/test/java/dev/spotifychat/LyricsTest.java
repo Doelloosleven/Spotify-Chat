@@ -125,6 +125,20 @@ class LyricsTest {
     }
 
     @Test
+    void tabCompletesSongs() {
+        List<String> songs = List.of("HAZARD DUTY PAY! - JPEGMAFIA", "Crazy in Love (feat. JAŸ-Z) - Beyoncé",
+                "Blinding Lights - The Weeknd");
+        assertEquals(List.of("HAZARD DUTY PAY! - JPEGMAFIA"), SongSuggestions.matches("HAZ", songs));
+        assertEquals(List.of("HAZARD DUTY PAY! - JPEGMAFIA"), SongSuggestions.matches("duty", songs)); // any word
+        assertEquals(List.of("HAZARD DUTY PAY! - JPEGMAFIA"), SongSuggestions.matches("jpeg", songs)); // the artist
+        assertEquals(List.of("Crazy in Love (feat. JAŸ-Z) - Beyoncé"), SongSuggestions.matches("feat", songs));
+        assertEquals(songs, SongSuggestions.matches("", songs)); // just "!queue " + Tab: all of them
+        assertTrue(SongSuggestions.matches("zzz", songs).isEmpty());
+        assertTrue(SongSuggestions.matches("ights", songs).isEmpty()); // only from the start of a word
+        assertEquals(List.of("A - B"), SongSuggestions.matches("a", List.of("A - B", "A - B"))); // no doubles
+    }
+
+    @Test
     void queueRequests() {
         Matcher m = SpotifyChatClient.QUEUE.matcher("!queue never gonna give you up");
         assertTrue(m.matches());

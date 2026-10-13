@@ -1041,6 +1041,7 @@ public class SpotifyChatClient implements ClientModInitializer {
                 lastWebPoll = now;
                 spotify.fetchNowPlaying().whenComplete((r, e) -> {
                     if (e == null) webOverlayTrack = r.orElse(null);
+                    if (e == null && r.isPresent() && r.get().playing()) SongSuggestions.saw(r.get());
                     webPolling = false;
                 });
             }
@@ -1114,7 +1115,7 @@ public class SpotifyChatClient implements ClientModInitializer {
         info("/irc <message>  - same, as a command", ChatFormatting.GRAY);
         info("]  or /girc <message>  - write to your guild's private IRC (if your guild has one)", ChatFormatting.GRAY);
         info("/irc online  - how many people are in IRC", ChatFormatting.GRAY);
-        info("!queue <song>  - everyone with Spotify Chat gets a button to add the song to their Spotify queue",
+        info("!queue <song>  - everyone with Spotify Chat gets a button to add the song to their queue (Tab fills in songs)",
                 ChatFormatting.GRAY);
         info("/spotify or F4  - open the settings menu", ChatFormatting.GRAY);
         info("/spotify public / private  - who sees the song (now: "

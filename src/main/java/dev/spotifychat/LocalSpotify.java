@@ -99,6 +99,7 @@ public final class LocalSpotify {
         if (track.isPresent() && Util.getPlatform() == Util.OS.WINDOWS) {
             PlaybackClock.seen(track.get().song(), track.get().playing(), System.currentTimeMillis());
         }
+        if (track.isPresent() && track.get().playing()) SongSuggestions.saw(track.get()); // for Tab after !queue
         latest = track;
         return track;
     }

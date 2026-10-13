@@ -29,7 +29,7 @@ No login needed, it reads the song from the Spotify desktop app. Client-side, wo
 | <kbd>[</kbd> or `/irc <msg>` | Chat in the Spotify Chat IRC (`!spotify` there shares your song in IRC) |
 | <kbd>]</kbd> or `/girc <msg>` | Chat in your Hypixel guild's private IRC |
 | `/irc online` | How many people are in IRC |
-| `!queue <song>` | Everyone with the mod gets a button to add the song to their Spotify queue |
+| `!queue <song>` | Everyone with the mod gets a button to add the song to their Spotify queue (<kbd>Tab</kbd> fills in the song that's playing) |
 | <kbd>←</kbd> <kbd>→</kbd> <kbd>↓</kbd> | Previous / next / play-pause |
 | `/spotify lyrics` | Lyrics on the overlay on / off |
 | <kbd>F4</kbd> or `/spotify` | Settings |
