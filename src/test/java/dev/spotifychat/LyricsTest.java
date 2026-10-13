@@ -136,6 +136,16 @@ class LyricsTest {
         assertTrue(SongSuggestions.matches("zzz", songs).isEmpty());
         assertTrue(SongSuggestions.matches("ights", songs).isEmpty()); // only from the start of a word
         assertEquals(List.of("A - B"), SongSuggestions.matches("a", List.of("A - B", "A - B"))); // no doubles
+
+        // Where the song starts: plain chat, and after /gc /pc /cc /irc /girc
+        assertEquals(7, SongSuggestions.songStart("!queue haz"));
+        assertEquals(11, SongSuggestions.songStart("/gc !queue hazaa"));
+        assertEquals(11, SongSuggestions.songStart("/PC !QUEUE "));
+        assertEquals(13, SongSuggestions.songStart("/girc !queue x"));
+        assertEquals(19, SongSuggestions.songStart("/guild chat !queue x"));
+        assertEquals(-1, SongSuggestions.songStart("/gc hello"));
+        assertEquals(-1, SongSuggestions.songStart("/msg !queue x"));
+        assertEquals(-1, SongSuggestions.songStart("!queue")); // no space yet
     }
 
     @Test

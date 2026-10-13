@@ -336,6 +336,7 @@ public class SpotifyChatClient implements ClientModInitializer {
                 ScreenEvents.afterExtract(screen).register((s, g, mouseX, mouseY, delta) -> {
                     boolean guild = guildIrcMode && config.ircEnabled;
                     if (!ircMode() && !guild) return;
+                    if (suggestionsOpen(s)) return; // the Tab list opens right where the label is
                     var font = Minecraft.getInstance().font;
                     Component label = Component.literal(guild ? "GUILD IRC" : "IRC").withStyle(ChatFormatting.BOLD);
                     String hint = guild ? "this message goes to your guild" : "this message goes to " + irc.channel();
@@ -644,6 +645,28 @@ public class SpotifyChatClient implements ClientModInitializer {
         // Once the server accepts it, the IRC client shows it in chat exactly as it was sent (cleaned and cut
         // to fit), not as typed
         if (irc.send(text, false) == null) ircInfo("Couldn't send, reconnecting...");
+    }
+
+    private static final java.lang.reflect.Field CHAT_SUGGESTIONS = chatSuggestionsField();
+
+    private static java.lang.reflect.Field chatSuggestionsField() {
+        try {
+            java.lang.reflect.Field f = ChatScreen.class.getDeclaredField("commandSuggestions");
+            f.setAccessible(true);
+            return f;
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** The chat's Tab / command suggestion list is showing */
+    private static boolean suggestionsOpen(net.minecraft.client.gui.screens.Screen screen) {
+        try {
+            Object s = CHAT_SUGGESTIONS == null ? null : CHAT_SUGGESTIONS.get(screen);
+            return s instanceof net.minecraft.client.gui.components.CommandSuggestions cs && cs.isVisible();
+        } catch (IllegalAccessException e) {
+            return false;
+        }
     }
 
     /** "Channels" for a share that goes to IRC instead of the server ("#" can't start a server command) */

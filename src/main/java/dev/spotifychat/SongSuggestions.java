@@ -12,6 +12,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Tab in chat after "!queue ": the song playing now and the ones played before it this session, like
@@ -21,7 +23,9 @@ import java.util.concurrent.CompletableFuture;
 public final class SongSuggestions {
     private SongSuggestions() {}
 
-    static final String TRIGGER = "!queue ";
+    /** "!queue ", also after /gc, /pc, /cc (Hypixel) and /irc, /girc */
+    private static final Pattern TRIGGER = Pattern.compile(
+            "(?:/(?:gc|pc|cc|irc|girc|guild chat|party chat) +)?!queue ", Pattern.CASE_INSENSITIVE);
     private static final int HISTORY = 30;
     /** Newest first, "Title - Artist" (game and Spotify-check threads) */
     private static final Deque<String> recent = new ArrayDeque<>();
@@ -45,7 +49,8 @@ public final class SongSuggestions {
     /** For the chat box: suggestions for "!queue ..." up to the cursor, or null for any other text */
     public static CompletableFuture<Suggestions> suggest(String text, int cursor) {
         String typed = text.substring(0, Math.max(0, Math.min(cursor, text.length())));
-        if (typed.length() < TRIGGER.length() || !typed.regionMatches(true, 0, TRIGGER, 0, TRIGGER.length())) return null;
+        int start = songStart(typed);
+        if (start < 0) return null;
         List<String> songs = new ArrayList<>();
         SpotifyClient.Track now = SpotifyChatClient.get().overlayTrack();
         if (now == null) now = LocalSpotify.latest().orElse(null);
@@ -54,10 +59,16 @@ public final class SongSuggestions {
             songs.addAll(recent);
         }
         // Built by hand: Brigadier's builder sorts A-Z, and the song playing now should come first
-        StringRange range = StringRange.between(TRIGGER.length(), typed.length());
-        List<Suggestion> list = matches(typed.substring(TRIGGER.length()), songs).stream()
+        StringRange range = StringRange.between(start, typed.length());
+        List<Suggestion> list = matches(typed.substring(start), songs).stream()
                 .map(song -> new Suggestion(range, song)).toList();
         return CompletableFuture.completedFuture(new Suggestions(range, list));
+    }
+
+    /** Where the song starts in "!queue <song>" or "/gc !queue <song>", or -1 */
+    static int songStart(String typed) {
+        Matcher m = TRIGGER.matcher(typed);
+        return m.lookingAt() ? m.end() : -1;
     }
 
     /** The songs (in order, no doubles) where the typed text starts the title or any word of it */
