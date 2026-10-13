@@ -31,7 +31,9 @@ import org.slf4j.LoggerFactory;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -59,11 +61,13 @@ import static net.fabricmc.fabric.api.client.command.v2.ClientCommands.literal;
  *   ] key, /girc <message>       write to your guild's private IRC (members are let in automatically)
  *   /irc online                  how many people are in IRC (just the number)
  *   !queue <song>                everyone with the mod gets a button to add the song to their Spotify queue
- *                                (goes through IRC, never to the server; /gc /pc /cc !queue work too)
+ *                                (goes through IRC, never to the server; /gc /pc /cc !queue work too). While
+ *                                you host a Jam you shared with !jam (and are logged in), others' requests go
+ *                                straight into it: they need no Spotify login.
  *   Someone else's "!spotify" / "!jam" in guild, party or co-op chat is answered in that same channel.
  *
  * Overlay: a "now playing" card on the HUD; /spotify overlay or a key from Controls turns it on/off.
- * /spotify lyrics shows the current line of the lyrics on it.
+ * /spotify lyrics shows the lyrics on it, animated (LyricsView).
  * Arrow keys (changeable): left = previous song, right = next song, down = play/pause.
  *
  * The song is read from the Spotify desktop app on this PC, so no login is needed.
@@ -118,6 +122,19 @@ public class SpotifyChatClient implements ClientModInitializer {
     private boolean openMenuNextTick = false;
     /** Your Jam invite link from the last !jam (only kept while the game runs) */
     private String jamLink;
+    /** When you last shared your Jam (0 = not yet): for some hours after, others' !queue songs go into it */
+    private long jamSharedAt;
+    private static final long JAM_OPEN_MS = 6 * 3_600_000L;
+    /** When songs were added to your Jam by request lately, so nobody can fill it up */
+    private final Deque<Long> jamAdds = new ArrayDeque<>();
+    private static final int JAM_MAX_ADDS = 12;
+    private static final long JAM_ADDS_WINDOW_MS = 10 * 60_000L;
+    /** Said at the end of a shared Jam link when your Spotify Chat adds the songs */
+    private static final String JAM_REQUESTS_NOTE = "  (!queue <song> adds songs)";
+    /** Someone else's Jam that takes !queue songs, seen in IRC: your own !queue says it goes there */
+    private String otherJamHost;
+    private long otherJamAt;
+    private boolean jamLoginTipShown;
 
     // Keys
     private KeyMapping overlayKey, playPauseKey, nextKey, previousKey, ircKey, guildIrcKey, menuKey;
@@ -244,7 +261,7 @@ public class SpotifyChatClient implements ClientModInitializer {
             if (queue.matches()) {
                 String who = queue.group(2);
                 songRequest(who, queue.group(3), "[" + queue.group(1) + "] ", ChatFormatting.DARK_GREEN, null,
-                        who.equalsIgnoreCase(Minecraft.getInstance().getUser().getName()));
+                        channelOf(queue.group(1)), who.equalsIgnoreCase(Minecraft.getInstance().getUser().getName()));
                 return;
             }
             if (!config.publicMessages) return;
@@ -320,6 +337,7 @@ public class SpotifyChatClient implements ClientModInitializer {
 
         irc = new IrcClient(m -> runOnGame(() -> {
             showIrc(m);
+            jamSeen(m);
             songRequest(m);
         }), notice -> runOnGame(() -> ircInfo(notice)),
                 Mc::joinServer);
@@ -415,7 +433,8 @@ public class SpotifyChatClient implements ClientModInitializer {
                                 .executes(ctx -> run(this::jamStatus))
                                 .then(literal("clear").executes(ctx -> run(() -> {
                                     jamLink = null;
-                                    info("Jam link forgotten.", ChatFormatting.GREEN);
+                                    jamSharedAt = 0;
+                                    info("Jam link forgotten. !queue songs don't go into it anymore.", ChatFormatting.GREEN);
                                 })))
                                 .then(argument("link", StringArgumentType.greedyString())
                                         .executes(ctx -> run(() ->
@@ -432,7 +451,8 @@ public class SpotifyChatClient implements ClientModInitializer {
                         .then(literal("lyrics").executes(ctx -> run(this::toggleLyrics)))
                         .then(literal("queue")
                                 .executes(ctx -> run(() -> info("Song requests: type !queue <song> in any chat. Everyone with Spotify Chat "
-                                        + "gets a button to add it to their Spotify queue (it goes through IRC).",
+                                        + "gets a button to add it to their Spotify queue (it goes through IRC). Someone who "
+                                        + "shared a Jam with !jam gets it added to the Jam by itself: no login needed to ask.",
                                         ChatFormatting.GRAY)))
                                 .then(literal("accept").then(argument("id", IntegerArgumentType.integer(1))
                                         .executes(ctx -> run(() ->
@@ -486,19 +506,49 @@ public class SpotifyChatClient implements ClientModInitializer {
     private boolean ownJam(String channel) {
         if (!pickJamLink()) return false;
         lastOwnShare.put("jam", System.currentTimeMillis());
-        return shareJam(channel, jamLink);
+        boolean shared = shareJam(channel, jamLink);
+        if (shared) jamShared();
+        return shared;
+    }
+
+    /** "♫ Join my Spotify Jam: <link>", and that !queue adds songs when your Spotify Chat does that */
+    private String jamText(String link) {
+        String prefix = config.jamPrefix.strip();
+        String text = (prefix.isEmpty() ? "" : prefix + " ") + link;
+        return jamCanTakeRequests() ? text + JAM_REQUESTS_NOTE : text;
+    }
+
+    /** Others' !queue songs can go into your Jam: switched on, and Spotify lets the mod add songs */
+    private boolean jamCanTakeRequests() {
+        return config.jamRequests && config.songRequests && spotify.isLoggedIn();
+    }
+
+    /** You shared your Jam lately: others' !queue songs go into it */
+    private boolean jamTakesRequests() {
+        return jamCanTakeRequests() && jamLink != null && jamSharedAt > 0
+                && System.currentTimeMillis() - jamSharedAt < JAM_OPEN_MS;
+    }
+
+    private void jamShared() {
+        jamSharedAt = System.currentTimeMillis();
+        if (config.jamRequests && config.songRequests && config.ircEnabled && !spotify.isLoggedIn() && !jamLoginTipShown) {
+            jamLoginTipShown = true;
+            info("Tip: /spotify login once, and everyone's !queue <song> goes straight into your Jam. "
+                    + "They don't need a login for that, only you.", ChatFormatting.AQUA);
+        }
     }
 
     /** !jam typed in an IRC chat ([ or ]): your "!jam" and the link go to that IRC only, never to the server */
     private void jamToIrc(String target, String trigger) {
         if (!pickJamLink()) return;
-        String withLink = (config.jamPrefix.isBlank() ? "" : config.jamPrefix.strip() + " ") + jamLink;
+        String withLink = jamText(jamLink);
         if (!config.publicMessages) {
             info(withLink, ChatFormatting.GREEN);
             return;
         }
         if (showTriggerPublicly()) sendIrcTarget(target, trigger);
         sendIrcTarget(target, withLink);
+        jamShared();
     }
 
     /** The Jam link from the clipboard, or the one from earlier; false (and a hint) if there's none */
@@ -524,7 +574,7 @@ public class SpotifyChatClient implements ClientModInitializer {
      */
     private boolean shareJam(String channel, String link) {
         String prefix = config.jamPrefix.strip();
-        String withLink = (prefix.isEmpty() ? "" : prefix + " ") + link;
+        String withLink = jamText(link);
         if (!config.publicMessages) {
             info(withLink, ChatFormatting.GREEN);
             return true;
@@ -549,9 +599,19 @@ public class SpotifyChatClient implements ClientModInitializer {
 
     /** Someone else asked for your Jam: the link goes to IRC (never to a server that blocks links). */
     private void answerJam(String channel) {
-        String withLink = (config.jamPrefix.isBlank() ? "" : config.jamPrefix.strip() + " ") + jamLink;
+        String withLink = jamText(jamLink);
         if (ircConnected()) sendIrc(withLink);
         else if (!linksBlockedHere()) queueSend(channel, withLink, false, System.currentTimeMillis() + SEND_DELAY_MS);
+        jamSharedAt = System.currentTimeMillis();
+    }
+
+    /** Someone else's Jam link in IRC: remembered, so your own !queue can say it goes into that Jam */
+    private void jamSeen(IrcClient.Message m) {
+        if (m.action() || (!m.discord() && m.nick().equalsIgnoreCase(irc.nick()))) return;
+        if (!JAM_LINK.matcher(m.text()).find()) return;
+        boolean takesRequests = m.text().toLowerCase(Locale.ROOT).contains("!queue");
+        otherJamHost = takesRequests ? m.nick() : null;
+        otherJamAt = System.currentTimeMillis();
     }
 
     /** Hypixel warns and punishes for links ("advertising") */
@@ -719,7 +779,8 @@ public class SpotifyChatClient implements ClientModInitializer {
     private static final long REQUEST_GAP_MS = 15_000;
     private static final int MAX_REQUESTS = 5;
 
-    private record SongRequest(String from, String song, String target, long at) {}
+    /** target: the IRC channel a "Queued ..." goes to; channel: the guild / party / co-op chat it came from */
+    private record SongRequest(String from, String song, String target, String channel, long at) {}
 
     // Game thread only
     private final Map<Integer, SongRequest> requests = new LinkedHashMap<>();
@@ -741,15 +802,18 @@ public class SpotifyChatClient implements ClientModInitializer {
         if (m.action()) return;
         boolean own = !m.discord() && m.nick().equalsIgnoreCase(irc.nick());
         songRequest(m.nick(), m.text(), m.guild() ? "[Guild IRC] " : "[IRC] ",
-                m.guild() ? ChatFormatting.AQUA : ChatFormatting.DARK_GREEN, m.guild() ? GUILD_IRC_TARGET : IRC_TARGET, own);
+                m.guild() ? ChatFormatting.AQUA : ChatFormatting.DARK_GREEN, m.guild() ? GUILD_IRC_TARGET : IRC_TARGET,
+                null, own);
     }
 
     /**
      * Shows a "!queue <song>" with a button to add it to your Spotify queue. Your own too: so you see it
-     * went out, and can add it yourself. answerTo: the IRC channel a "Queued ..." goes to (null = none).
+     * went out, and can add it yourself. While your shared Jam is open the song goes straight into it instead.
+     * answerTo: the IRC channel a "Queued ..." goes to (null = none); channel: the guild / party / co-op chat
+     * it came from (null = IRC).
      */
     private void songRequest(String from, String text, String label, ChatFormatting labelColor, String answerTo,
-                             boolean own) {
+                             String channel, boolean own) {
         if (!config.songRequests) return;
         Matcher q = QUEUE.matcher(text.trim());
         if (!q.matches()) return;
@@ -763,13 +827,32 @@ public class SpotifyChatClient implements ClientModInitializer {
         requests.values().removeIf(r -> now - r.at() > REQUEST_TTL_MS);
         while (requests.size() >= MAX_REQUESTS) requests.remove(requests.keySet().iterator().next());
 
-        int id = nextRequestId++;
         String song = q.group(1).trim();
-        requests.put(id, new SongRequest(from, song, own ? null : answerTo, now));
+        SongRequest request = new SongRequest(from, song, own ? null : answerTo, own ? null : channel, now);
+        Component labelPart = Component.literal(label).withStyle(labelColor);
+        if (jamTakesRequests() && jamHasRoom(now)) {
+            addToJam(request, labelPart, own);
+            return;
+        }
+
+        int id = nextRequestId++;
+        requests.put(id, request);
         String hover = spotify.isLoggedIn() ? "Adds the best match on Spotify to your queue"
                 : "Opens the search in Spotify. Log in once with /spotify login and this adds it by itself";
-        MutableComponent line = Component.empty().append(Component.literal(label).withStyle(labelColor));
-        if (own) {
+        MutableComponent line = Component.empty().append(labelPart);
+        boolean otherJam = otherJamHost != null && now - otherJamAt < JAM_OPEN_MS;
+        if (own && otherJam) {
+            // Someone shared a Jam that takes requests: their Spotify Chat adds it, no login needed here
+            line.append(Component.literal("Sent: ").withStyle(ChatFormatting.GRAY))
+                    .append(Component.literal(song).withStyle(ChatFormatting.WHITE))
+                    .append(Component.literal(" goes into ").withStyle(ChatFormatting.GRAY))
+                    .append(Component.literal(otherJamHost).withStyle(ChatFormatting.LIGHT_PURPLE))
+                    .append(Component.literal("'s Jam").withStyle(ChatFormatting.GRAY));
+            if (spotify.isLoggedIn()) {
+                line.append(Component.literal("  "))
+                        .append(button("[Add to my queue]", ChatFormatting.GREEN, "/spotify queue accept " + id, hover));
+            }
+        } else if (own) {
             line.append(Component.literal("Sent: everyone with Spotify Chat gets a button to queue ").withStyle(ChatFormatting.GRAY))
                     .append(Component.literal(song).withStyle(ChatFormatting.WHITE))
                     .append(Component.literal("  "))
@@ -785,6 +868,54 @@ public class SpotifyChatClient implements ClientModInitializer {
                             "Nothing happens, and nobody is told"));
         }
         Mc.chat().addClientSystemMessage(line);
+    }
+
+    /** Room for one more song in your Jam (at most JAM_MAX_ADDS per 10 minutes); past that the buttons come back */
+    private boolean jamHasRoom(long now) {
+        while (!jamAdds.isEmpty() && now - jamAdds.peekFirst() > JAM_ADDS_WINDOW_MS) jamAdds.pollFirst();
+        return jamAdds.size() < JAM_MAX_ADDS;
+    }
+
+    /**
+     * A request while your shared Jam is open: straight into your queue, which is the Jam's queue. Whoever
+     * asked doesn't need a Spotify login, only you. The "Added" goes back where the request came from.
+     */
+    private void addToJam(SongRequest r, Component label, boolean own) {
+        jamAdds.addLast(System.currentTimeMillis());
+        spotify.queue(r.song()).whenComplete((queued, err) -> runOnGame(() -> {
+            if (err != null) {
+                Throwable cause = err;
+                while (cause.getCause() != null && cause.getCause() != cause) cause = cause.getCause();
+                if (cause instanceof SpotifyClient.MissingPermission) {
+                    info("To add !queue songs to your Jam, Spotify needs a new login (yours is from before song "
+                            + "requests): /spotify login", ChatFormatting.YELLOW);
+                } else {
+                    info("Couldn't add " + (own ? "" : r.from() + "'s ") + r.song() + " to your Jam: "
+                            + rootMessage(err), ChatFormatting.RED);
+                }
+                return;
+            }
+            String song = queued.song() + (queued.artist().isBlank() ? "" : " - " + queued.artist());
+            MutableComponent line = Component.empty().append(label);
+            if (!own) {
+                line.append(Component.literal(r.from()).withStyle(ChatFormatting.LIGHT_PURPLE))
+                        .append(Component.literal(" added ").withStyle(ChatFormatting.GRAY));
+            } else {
+                line.append(Component.literal("Added ").withStyle(ChatFormatting.GRAY));
+            }
+            Mc.chat().addClientSystemMessage(line.append(Component.literal(song).withStyle(ChatFormatting.WHITE))
+                    .append(Component.literal(" to your Jam").withStyle(ChatFormatting.GRAY)));
+            if (own) return;
+            String reply = "♫ Added " + song + " to the Jam (asked by " + r.from() + ")";
+            long now = System.currentTimeMillis();
+            if (r.target() != null) {
+                if (ircConnected()) sendIrcTarget(r.target(), reply);
+            } else if (r.channel() != null && config.publicMessages && answers(r.channel())
+                    && now - lastRemoteShare >= config.answerCooldownSeconds * 1000L) {
+                lastRemoteShare = now; // guild / party / co-op chat: same spam guard as the other answers
+                queueSend(r.channel(), reply, false, now + SEND_DELAY_MS);
+            }
+        }));
     }
 
     private static Component button(String text, ChatFormatting color, String command, String hover) {
@@ -818,7 +949,8 @@ public class SpotifyChatClient implements ClientModInitializer {
                 // No Spotify app set up for the login: the best we can do is the search
                 openSpotifySearch(r.song());
                 info("Spotify is open on the search: right-click the song > Add to queue. For the mod to add "
-                        + "songs by itself, set up the phone / web player once (/spotify login shows how).",
+                        + "songs by itself, set up the phone / web player once (/spotify login shows how). "
+                        + "Or join a friend's Jam: if they're logged in, everyone's !queue goes into it.",
                         ChatFormatting.YELLOW);
                 return;
             }
@@ -901,11 +1033,16 @@ public class SpotifyChatClient implements ClientModInitializer {
             line.append(Component.literal(m.text().substring(pos, u.start())).withStyle(ChatFormatting.WHITE));
             String url = u.group();
             String kind = config.chatImages ? ChatImages.kind(url) : null;
+            boolean jam = JAM_LINK.matcher(url).matches();
             try {
                 URI uri = URI.create(url);
-                // Discord's links are long, and the picture itself shows below: just "[GIF]", still clickable
-                line.append(Component.literal(kind == null ? url : "[" + kind + "]").withStyle(style -> style
-                        .withColor(ChatFormatting.GREEN).withUnderlined(true).withClickEvent(new ClickEvent.OpenUrl(uri))));
+                // Discord's links are long, and the picture itself shows below: just "[GIF]", still clickable.
+                // Jam links: "[Join Jam]"
+                String shown = jam ? "[Join Jam]" : kind == null ? url : "[" + kind + "]";
+                HoverEvent hover = jam ? new HoverEvent.ShowText(Component.literal(
+                        "Join this Spotify Jam: everyone in it hears the same songs. Opens " + url)) : null;
+                line.append(Component.literal(shown).withStyle(style -> style.withColor(ChatFormatting.GREEN)
+                        .withUnderlined(true).withClickEvent(new ClickEvent.OpenUrl(uri)).withHoverEvent(hover)));
                 if (kind != null && picture == null) picture = url;
             } catch (IllegalArgumentException e) {
                 line.append(Component.literal(url).withStyle(ChatFormatting.WHITE));
@@ -1160,8 +1297,8 @@ public class SpotifyChatClient implements ClientModInitializer {
         info("/irc <message>  - same, as a command", ChatFormatting.GRAY);
         info("]  or /girc <message>  - write to your guild's private IRC (if your guild has one)", ChatFormatting.GRAY);
         info("/irc online  - how many people are in IRC", ChatFormatting.GRAY);
-        info("!queue <song>  - everyone with Spotify Chat gets a button to add the song to their queue (Tab fills in songs)",
-                ChatFormatting.GRAY);
+        info("!queue <song>  - everyone with Spotify Chat gets a button to add the song to their queue (Tab fills in songs). "
+                + "If you shared a Jam and are logged in, others' songs go straight into it.", ChatFormatting.GRAY);
         info("/spotify or F4  - open the settings menu", ChatFormatting.GRAY);
         info("/spotify public / private  - who sees the song (now: "
                 + (config.publicMessages ? "public" : "private") + ")", ChatFormatting.GRAY);

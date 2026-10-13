@@ -26,10 +26,8 @@ public class SpotifyOverlay implements HudElement {
     private static final int BACKGROUND = 0xE0121212;
     /** A new song keeps the old colors this long while its cover is looked up, instead of flashing gray */
     private static final long COVER_WAIT_MS = 3_000;
-    /** Lyrics: two lines of room under the song, so the card doesn't jump when a line wraps */
-    private static final int LYRIC_ROWS = 2, LYRIC_GAP = 5;
-    /** Show each lyrics line a moment early: the reading is a little behind and it reads better */
-    private static final long LYRIC_LEAD_MS = 200;
+    /** Space between the song and the lyrics under it */
+    private static final int LYRIC_GAP = 5;
 
     // Colors fade from one song to the next (render thread only)
     private static CoverColors.Palette shown, target;
@@ -59,11 +57,10 @@ public class SpotifyOverlay implements HudElement {
     static int[] drawAtConfiguredSpot(GuiGraphicsExtractor g, Font font, SpotifyClient.Track t, ModConfig cfg,
                                       int screenW, int screenH) {
         float scale = cfg.overlayScale / 100f;
-        String lyric = lyric(t, cfg);
-        if (lyric == null && cfg.overlayLyrics && Mc.screen() instanceof OverlayPositionScreen) {
-            lyric = "The lyrics go here"; // so the card is placed with its full size
-        }
-        Size size = measure(font, t, cfg, lyric);
+        List<Lyrics.Line> lyrics = lyrics(t, cfg);
+        // In the editor the card is placed with its full size, lyrics or not
+        boolean placeholder = lyrics == null && cfg.overlayLyrics && Mc.screen() instanceof OverlayPositionScreen;
+        Size size = measure(font, t, cfg, lyrics != null || placeholder);
         int w = Math.round(size.width() * scale), h = Math.round(size.height() * scale);
         int x = clamp((int) Math.round(cfg.overlayX * screenW), 0, Math.max(0, screenW - w));
         int y = clamp((int) Math.round(cfg.overlayY * screenH), 0, Math.max(0, screenH - h));
@@ -71,7 +68,7 @@ public class SpotifyOverlay implements HudElement {
         g.pose().pushMatrix();
         g.pose().translate(x, y);
         g.pose().scale(scale, scale);
-        draw(g, font, t, cfg, size, lyric);
+        draw(g, font, t, cfg, size, lyrics, placeholder);
         g.pose().popMatrix();
         return new int[]{x, y, w, h};
     }
@@ -89,22 +86,19 @@ public class SpotifyOverlay implements HudElement {
         return lines;
     }
 
-    /** The lyrics line to show now ("" between lines), or null when there's no lyrics row */
-    static String lyric(SpotifyClient.Track t, ModConfig cfg) {
+    /** The song's lyrics, or null when there's no lyrics part: off, none found, or unknown where in the song */
+    static List<Lyrics.Line> lyrics(SpotifyClient.Track t, ModConfig cfg) {
         if (!cfg.overlayLyrics) return null;
         List<Lyrics.Line> lines = Lyrics.get(t, PlaybackClock.length(t.song()));
-        if (lines == null) return null;
-        long at = PlaybackClock.position(t, System.currentTimeMillis());
-        if (at < 0) return null; // don't know where in the song Spotify is
-        int i = Lyrics.indexAt(lines, at + LYRIC_LEAD_MS);
-        return i < 0 ? "" : lines.get(i).text();
+        if (lines == null || PlaybackClock.position(t, System.currentTimeMillis()) < 0) return null;
+        return lines;
     }
 
     public static Size measure(Font font, SpotifyClient.Track t, ModConfig cfg) {
-        return measure(font, t, cfg, lyric(t, cfg));
+        return measure(font, t, cfg, lyrics(t, cfg) != null);
     }
 
-    private static Size measure(Font font, SpotifyClient.Track t, ModConfig cfg, String lyric) {
+    private static Size measure(Font font, SpotifyClient.Track t, ModConfig cfg, boolean lyrics) {
         int textW = 0;
         List<String> lines = lines(t, cfg);
         for (int i = 0; i < lines.size(); i++) {
@@ -112,9 +106,9 @@ public class SpotifyOverlay implements HudElement {
                     : font.width(lines.get(i));
             textW = Math.max(textW, Math.min(MAX_TEXT, w));
         }
-        if (lyric != null) textW = MAX_TEXT; // full width with lyrics, so the card doesn't change size per line
+        if (lyrics) textW = MAX_TEXT; // full width with lyrics, so the card doesn't change size per line
         int left = PAD + 2 + (cfg.overlayShowCover ? COVER + 6 : 4);
-        return new Size(left + textW + PAD + 2, songHeight(cfg, lines.size()) + (lyric == null ? 0 : lyricHeight()));
+        return new Size(left + textW + PAD + 2, songHeight(cfg, lines.size()) + (lyrics ? lyricHeight() : 0));
     }
 
     /** Picks this frame's colors: the album's (faded in) or the normal ones in the menu color. */
@@ -176,12 +170,12 @@ public class SpotifyOverlay implements HudElement {
     }
 
     private static int lyricHeight() {
-        return LYRIC_GAP + LYRIC_ROWS * 10 - 2 + PAD;
+        return LYRIC_GAP + LyricsView.HEIGHT + PAD - 2;
     }
 
     /** Draws the card with its top-left corner at 0,0 (the caller positions and scales it). */
     private static void draw(GuiGraphicsExtractor g, Font font, SpotifyClient.Track t, ModConfig cfg, Size size,
-                             String lyric) {
+                             List<Lyrics.Line> lyrics, boolean placeholder) {
         CoverColors.Palette colors = updateColors(t, cfg);
         List<String> lines = lines(t, cfg);
         int w = size.width(), full = size.height(), h = songHeight(cfg, lines.size());
@@ -213,30 +207,11 @@ public class SpotifyOverlay implements HudElement {
             g.text(font, c, textX, y, color, false);
             y += 10;
         }
-        if (lyric != null) drawLyric(g, font, lyric, colors, w, h);
-    }
-
-    /** The current lyrics line under the song, wrapped over at most two lines; a note between lines */
-    private static void drawLyric(GuiGraphicsExtractor g, Font font, String lyric, CoverColors.Palette colors,
-                                  int w, int top) {
-        int x = PAD + 2, maxW = w - x - PAD - 2;
-        g.fill(x, top + 1, w - PAD - 2, top + 2, CoverColors.mix(colors.text(), colors.left(), 0.6f));
-        int y = top + LYRIC_GAP;
-        if (lyric.isBlank()) {
-            g.text(font, Component.literal("♪"), x, y, CoverColors.mix(colors.text(), DARK_GRAY, 0.5f), false);
-            return;
-        }
-        List<String> rows = new ArrayList<>();
-        for (var part : font.getSplitter().splitLines(lyric, maxW, net.minecraft.network.chat.Style.EMPTY)) {
-            rows.add(part.getString());
-        }
-        for (int i = 0; i < Math.min(LYRIC_ROWS, rows.size()); i++) {
-            String row = rows.get(i);
-            if (i == LYRIC_ROWS - 1 && rows.size() > LYRIC_ROWS) {
-                row = fit(font, String.join(" ", rows.subList(i, rows.size())), maxW); // cut the rest with "..."
-            }
-            g.text(font, Component.literal(row), x, y, WHITE, false);
-            y += 10;
-        }
+        if (lyrics == null && !placeholder) return;
+        // A thin line between the song and the lyrics
+        int x = PAD + 2;
+        g.fill(x, h + 1, w - PAD - 2, h + 2, CoverColors.mix(colors.text(), colors.left(), 0.6f));
+        if (lyrics != null) LyricsView.draw(g, font, t, lyrics, colors, x, h + LYRIC_GAP, w - x - PAD - 2);
+        else LyricsView.drawPlaceholder(g, font, x, h + LYRIC_GAP);
     }
 }

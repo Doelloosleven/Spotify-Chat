@@ -211,7 +211,8 @@ public class SpotifyConfigScreen extends Screen {
                         + "and its liveliest color for the bar and text. Off: dark gray with your menu color.",
                 () -> cfg.overlayAlbumColors, v -> cfg.overlayAlbumColors = v);
         toggle(right, y, colW, rowH, "Lyrics",
-                "The current line of the song's lyrics under it, in time with the song. Lyrics come from "
+                "The song's lyrics under it, in time with the song: the line being sung fills up, the next "
+                        + "one waits below. Lyrics come from "
                         + "lrclib.net (the song's name and artist are sent there). Not every song has them. "
                         + "Also: /spotify lyrics",
                 () -> cfg.overlayLyrics, v -> cfg.overlayLyrics = v);
@@ -267,11 +268,16 @@ public class SpotifyConfigScreen extends Screen {
                 () -> cfg.chatImageLines - ModConfig.MIN_IMAGE_LINES, v -> cfg.chatImageLines = v + ModConfig.MIN_IMAGE_LINES,
                 v -> "GIF size: " + (v + ModConfig.MIN_IMAGE_LINES) + " lines"));
         y += step;
-        toggle(left, y, panelW - 16, rowH, "Song requests (!queue <song> in IRC)",
+        toggle(left, y, colW, rowH, "Song requests (!queue)",
                 "When someone types \"!queue <song>\" in IRC, you get a button to add it to your Spotify queue. "
                         + "Nothing happens unless you click it. Adding it for you needs the phone / web player "
                         + "login; without it the button opens the search.",
                 () -> cfg.songRequests, v -> cfg.songRequests = v);
+        toggle(right, y, colW, rowH, "Add requests to my Jam",
+                "After you share your Spotify Jam with !jam (and with the phone / web player login), others' "
+                        + "\"!queue <song>\" goes straight into the Jam, no click needed. They don't need a login "
+                        + "for that, only you. At most 12 songs per 10 minutes, for 6 hours after !jam.",
+                () -> cfg.jamRequests, v -> cfg.jamRequests = v);
         y += step + 2;
         IrcClient irc = client.irc();
         String status = switch (irc.status()) {

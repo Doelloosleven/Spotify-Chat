@@ -64,6 +64,11 @@ public class ModConfig {
      */
     public boolean jamNoteGuildParty = true;
     public boolean jamNoteAllChat = false;
+    /**
+     * While your shared Jam is open and you're logged in, others' "!queue <song>" goes straight into it,
+     * no click needed. They don't need a Spotify login for that.
+     */
+    public boolean jamRequests = true;
 
     // ---- IRC chat (between Spotify Chat users in #spotifychat on Rizon, outside the Minecraft server)
     public boolean ircEnabled = true;
@@ -76,7 +81,7 @@ public class ModConfig {
     /** How tall they are, in chat lines */
     public int chatImageLines = 6;
     public static final int MIN_IMAGE_LINES = 3, MAX_IMAGE_LINES = 12;
-    /** "!queue <you> <song>" in IRC asks you to add a song to your Spotify queue (you click to accept) */
+    /** "!queue <song>" from others gives you a button to add it to your Spotify queue */
     public boolean songRequests = true;
 
     // ---- Updates
