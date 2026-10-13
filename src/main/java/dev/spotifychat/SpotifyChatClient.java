@@ -1109,7 +1109,29 @@ public class SpotifyChatClient implements ClientModInitializer {
         return Command.SINGLE_SUCCESS;
     }
 
+    /**
+     * Why this can't be a Client ID, or null if it can. Client IDs are 32 hex characters; the dashboard's
+     * "Spotify Soloist API Key" (spak_...) sits right next to "Create app" and is easy to take by mistake.
+     */
+    static String clientIdProblem(String id) {
+        String s = id.trim();
+        if (s.toLowerCase(Locale.ROOT).startsWith("spak_")) {
+            return "That's a \"Spotify Soloist API Key\", not a Client ID. In the Spotify dashboard click "
+                    + "Create app instead, and copy the Client ID from that app's page.";
+        }
+        if (!s.matches("[0-9a-fA-F]{32}")) {
+            return "That isn't a Client ID: it's 32 letters and numbers, on your app's page in the Spotify "
+                    + "dashboard (Create app, not Soloist API Key).";
+        }
+        return null;
+    }
+
     private void setClientId(String id) {
+        String problem = clientIdProblem(id);
+        if (problem != null) {
+            info(problem, ChatFormatting.RED);
+            return;
+        }
         config.clientId = id.trim();
         config.save();
         spotify.logout(); // the old login belongs to the old Client ID
@@ -1174,11 +1196,17 @@ public class SpotifyChatClient implements ClientModInitializer {
         if (config.clientId.isBlank()) {
             info("You don't need to log in: !spotify already works with the Spotify app on this PC.",
                     ChatFormatting.GREEN);
-            info("Login is only for sharing from your phone/web player. It needs a Client ID, "
+            info("Login is for your phone/web player and song requests. It needs Spotify Premium and a Client ID, "
                     + "opening the Spotify developer dashboard...", ChatFormatting.YELLOW);
-            info("Create an app there, then type /spotify id <clientId> and /spotify login  (see README)",
+            info("Click Create app (not Soloist API Key), redirect URI " + SpotifyClient.REDIRECT_URI
+                    + ", tick Web API. Then /spotify id <Client ID> and /spotify login  (see README)",
                     ChatFormatting.YELLOW);
             openInBrowser(DASHBOARD_URL, "Open the Spotify dashboard");
+            return;
+        }
+        String problem = clientIdProblem(config.clientId);
+        if (problem != null) {
+            info(problem + " Then /spotify id <Client ID>.", ChatFormatting.RED);
             return;
         }
         SpotifyClient.LoginSession session = spotify.startLogin();

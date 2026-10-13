@@ -149,6 +149,15 @@ class LyricsTest {
     }
 
     @Test
+    void onlyRealClientIds() {
+        assertNull(SpotifyChatClient.clientIdProblem("4c99fb7723e44301b3e34598411d4a9c"));
+        assertNull(SpotifyChatClient.clientIdProblem(" 4C99FB7723E44301B3E34598411D4A9C "));
+        assertTrue(SpotifyChatClient.clientIdProblem("spak_910iAKBADhtc124E0OcW8jYvugNm6HWj").contains("Soloist"));
+        assertTrue(SpotifyChatClient.clientIdProblem("not an id").contains("32 letters"));
+        assertTrue(SpotifyChatClient.clientIdProblem("4c99fb7723e44301b3e34598411d4a9").contains("32 letters"));
+    }
+
+    @Test
     void queueRequests() {
         Matcher m = SpotifyChatClient.QUEUE.matcher("!queue never gonna give you up");
         assertTrue(m.matches());
