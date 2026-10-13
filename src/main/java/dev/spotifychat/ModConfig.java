@@ -76,6 +76,8 @@ public class ModConfig {
     /** How tall they are, in chat lines */
     public int chatImageLines = 6;
     public static final int MIN_IMAGE_LINES = 3, MAX_IMAGE_LINES = 12;
+    /** "!queue <you> <song>" in IRC asks you to add a song to your Spotify queue (you click to accept) */
+    public boolean songRequests = true;
 
     // ---- Updates
     /** Chat message when a newer version is on GitHub */
@@ -88,6 +90,8 @@ public class ModConfig {
     public boolean overlayShowCover = true;
     public boolean overlayShowAlbum = true;
     public boolean overlayShowWhenPaused = true;
+    /** The current line of the song's lyrics on the card (from lrclib.net, so off unless you turn it on) */
+    public boolean overlayLyrics = false;
     /** Background and accent color taken from the album cover */
     public boolean overlayAlbumColors = true;
     /** Top-left corner as a fraction of the screen size, so it stays put when the window is resized */

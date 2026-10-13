@@ -210,14 +210,19 @@ public class SpotifyConfigScreen extends Screen {
                 "Color the card like the album cover: a gradient of the cover's main colors, "
                         + "and its liveliest color for the bar and text. Off: dark gray with your menu color.",
                 () -> cfg.overlayAlbumColors, v -> cfg.overlayAlbumColors = v);
-        addRenderableWidget(new SpotifyUi.Button(right, y, colW, rowH, "Move overlay", false,
-                () -> Mc.setScreen(new OverlayPositionScreen(this))));
+        toggle(right, y, colW, rowH, "Lyrics",
+                "The current line of the song's lyrics under it, in time with the song. Lyrics come from "
+                        + "lrclib.net (the song's name and artist are sent there). Not every song has them. "
+                        + "Also: /spotify lyrics",
+                () -> cfg.overlayLyrics, v -> cfg.overlayLyrics = v);
         y += step;
-        addRenderableWidget(new ValueSlider(left, y, panelW - 16, rowH, 150,
+        addRenderableWidget(new ValueSlider(left, y, colW, rowH, 150,
                 "Overlay size: 200%",
                 "How big the card is. You can also scroll while moving it.",
                 () -> cfg.overlayScale - 50, v -> cfg.overlayScale = v + 50,
                 v -> "Overlay size: " + (v + 50) + "%"));
+        addRenderableWidget(new SpotifyUi.Button(right, y, colW, rowH, "Move overlay", false,
+                () -> Mc.setScreen(new OverlayPositionScreen(this))));
         y += step;
         // Menu color: a row with the name on the left and a swatch per preset on the right
         themeRowY = y;
@@ -261,6 +266,12 @@ public class SpotifyConfigScreen extends Screen {
                 "How tall GIFs are in chat, in chat lines. Changes the next GIF.",
                 () -> cfg.chatImageLines - ModConfig.MIN_IMAGE_LINES, v -> cfg.chatImageLines = v + ModConfig.MIN_IMAGE_LINES,
                 v -> "GIF size: " + (v + ModConfig.MIN_IMAGE_LINES) + " lines"));
+        y += step;
+        toggle(left, y, panelW - 16, rowH, "Song requests (!queue <song> in IRC)",
+                "When someone types \"!queue <song>\" in IRC, you get a button to add it to your Spotify queue. "
+                        + "Nothing happens unless you click it. Adding it for you needs the phone / web player "
+                        + "login; without it the button opens the search.",
+                () -> cfg.songRequests, v -> cfg.songRequests = v);
         y += step + 2;
         IrcClient irc = client.irc();
         String status = switch (irc.status()) {

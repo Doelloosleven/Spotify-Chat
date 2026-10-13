@@ -36,7 +36,8 @@ import java.util.concurrent.Executors;
 public class SpotifyClient {
     public static final int PORT = 8888;
     public static final String REDIRECT_URI = "http://127.0.0.1:" + PORT + "/callback";
-    private static final String SCOPES = "user-read-currently-playing user-read-playback-state";
+    /** modify-playback-state: song requests (!queue) add songs to your queue (1.7.0; older logins lack it) */
+    private static final String SCOPES = "user-read-currently-playing user-read-playback-state user-modify-playback-state";
 
     /**
      * artists: main artist first, then the featured artists.
@@ -254,6 +255,58 @@ public class SpotifyClient {
         return JsonParser.parseString(res.body()).getAsJsonObject();
     }
 
+    // ------------------------------------------------------- song requests
+
+    /** The song a request ended up as */
+    public record Queued(String song, String artist) {}
+
+    /** Off the game thread: finds the best match for the search on Spotify and adds it to your queue. */
+    public CompletableFuture<Queued> queue(String search) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                return addToQueue(search);
+            } catch (Exception e) {
+                throw new RuntimeException(e.getMessage(), e);
+            }
+        });
+    }
+
+    private Queued addToQueue(String search) throws IOException, InterruptedException {
+        HttpResponse<String> found = http.send(HttpRequest.newBuilder(URI.create(
+                        "https://api.spotify.com/v1/search?type=track&limit=1&market=from_token&q=" + enc(search)))
+                .timeout(Duration.ofSeconds(10))
+                .header("Authorization", "Bearer " + getAccessToken())
+                .GET().build(), HttpResponse.BodyHandlers.ofString());
+        if (found.statusCode() == 401) {
+            synchronized (this) { accessToken = null; }
+            throw new IOException("Spotify rejected the login, try /spotify login again");
+        }
+        if (found.statusCode() != 200) throw new IOException("Spotify search failed (" + found.statusCode() + ")");
+        JsonArray items = JsonParser.parseString(found.body()).getAsJsonObject()
+                .getAsJsonObject("tracks").getAsJsonArray("items");
+        if (items.isEmpty()) throw new IOException("Spotify found nothing for \"" + search + "\"");
+        JsonObject track = items.get(0).getAsJsonObject();
+        JsonArray artists = track.getAsJsonArray("artists");
+        Queued queued = new Queued(str(track, "name"),
+                artists.isEmpty() ? "" : str(artists.get(0).getAsJsonObject(), "name"));
+
+        HttpResponse<String> res = http.send(HttpRequest.newBuilder(URI.create(
+                        "https://api.spotify.com/v1/me/player/queue?uri=" + enc(str(track, "uri"))))
+                .timeout(Duration.ofSeconds(10))
+                .header("Authorization", "Bearer " + getAccessToken())
+                .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
+        int code = res.statusCode();
+        String body = res.body().toLowerCase(java.util.Locale.ROOT);
+        if (code == 200 || code == 204) return queued;
+        if (body.contains("scope") || body.contains("permissions missing")) {
+            throw new IOException("Song requests need one more permission: type /spotify login once more");
+        }
+        if (body.contains("premium")) throw new IOException("Adding to the queue needs Spotify Premium");
+        if (code == 404) throw new IOException("Start playing something in Spotify first (it needs an active device)");
+        if (code == 429) throw new IOException("Too many requests, wait a moment");
+        throw new IOException("Spotify error " + code);
+    }
+
     // ---------------------------------------------------------- now playing
 
     /** Runs off the game thread. Empty = nothing is playing right now. */
@@ -315,6 +368,10 @@ public class SpotifyClient {
         }
         // "timestamp" = when the playback state last changed, so while paused it's when the pause started
         long changedAt = root.has("timestamp") ? root.get("timestamp").getAsLong() : 0;
+        if (root.has("progress_ms") && !root.get("progress_ms").isJsonNull()) { // for the lyrics
+            PlaybackClock.report(song, root.get("progress_ms").getAsLong(), System.currentTimeMillis(), playing,
+                    PlaybackClock.PLAYER);
+        }
         return Optional.of(new Track(song, names, album, playing, playing ? 0 : changedAt, cover));
     }
 

@@ -28,7 +28,10 @@ No login needed, it reads the song from the Spotify desktop app. Client-side, wo
 | `!jam` | Share your Spotify Jam link (copy it in Spotify first) |
 | <kbd>[</kbd> or `/irc <msg>` | Chat in the Spotify Chat IRC (`!spotify` there shares your song in IRC) |
 | <kbd>]</kbd> or `/girc <msg>` | Chat in your Hypixel guild's private IRC |
+| `/irc online` | How many people are in IRC |
+| `!queue <song>` (in IRC) | Everyone gets a button to add the song to their Spotify queue |
 | <kbd>←</kbd> <kbd>→</kbd> <kbd>↓</kbd> | Previous / next / play-pause |
+| `/spotify lyrics` | Lyrics on the overlay on / off |
 | <kbd>F4</kbd> or `/spotify` | Settings |
 | `/spotify help` | All commands |
 
@@ -40,6 +43,8 @@ When a guild, party or co-op member types `!spotify`, your song gets sent back.
 - **Guild IRC**: a private IRC for every Hypixel guild. When you join Hypixel the mod checks your guild with a hidden `/g online`, confirms your Minecraft account with Mojang, and you're let into your guild's chat automatically.
 - **GIFs in chat**: GIFs and pictures sent in IRC (from Discord, or Tenor / Giphy links) play right in your chat. They're only downloaded from Discord, Tenor and Giphy, so a link can't be used to grab your IP. Size and on/off are in the settings under IRC.
 - **Overlay** shows the song and album cover in the album's colors. Move it in the settings.
+- **Lyrics** (off by default, Overlay settings or `/spotify lyrics`): the current line of the song's lyrics under the song, in time with the music. They come from [lrclib.net](https://lrclib.net), so the song's name and artist are sent there. Not every song has synced lyrics.
+- **Song requests**: `!queue <song>` in IRC gives everyone there a [Queue it] button. Nothing is added unless you click it. With the phone / web player login the mod adds it to your queue (Spotify Premium); without it, the button opens the search. Turn requests off under IRC.
 - **Auto-update** is on by default and only installs signed releases; the new version is used from the next start. Turn it off under Keys & Updates. On Prism Launcher or MultiMC it can update right before the game starts instead: save [tools/prelaunch-update.ps1](tools/prelaunch-update.ps1) somewhere and set Settings > Custom commands > Pre-launch command to `powershell -NoProfile -ExecutionPolicy Bypass -File "C:\path\to\prelaunch-update.ps1"`.
 - **Phone / web player**: optional. Make an app at [developer.spotify.com](https://developer.spotify.com/dashboard) with redirect URI `http://127.0.0.1:8888/callback` (the app owner needs Premium), then `/spotify id <client id>` and `/spotify login`. The login is saved in `config/spotifychat-secrets.json`, don't share that file.
 

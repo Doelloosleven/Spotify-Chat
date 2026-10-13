@@ -95,6 +95,10 @@ public final class LocalSpotify {
             if (pausedSince == 0) pausedSince = System.currentTimeMillis();
             track = Optional.of(track.get().paused(pausedSince));
         }
+        // The window title doesn't say where in the song Spotify is: guess it from when the song changed
+        if (track.isPresent() && Util.getPlatform() == Util.OS.WINDOWS) {
+            PlaybackClock.seen(track.get().song(), track.get().playing(), System.currentTimeMillis());
+        }
         latest = track;
         return track;
     }
@@ -163,26 +167,34 @@ public final class LocalSpotify {
                 "-e", "tell application \"Spotify\"",
                 "-e", "if player state is not stopped then return (name of current track) & linefeed & "
                         + "(artist of current track) & linefeed & (album of current track) & linefeed & "
-                        + "(player state as string)",
+                        + "(player state as string) & linefeed & (player position as string)",
                 "-e", "end tell",
                 "-e", "end if");
-        return parseLines(out, "playing");
+        return parseLines(out, "playing", 1000); // position in seconds
     }
 
     // ---------------------------------------------------------------- Linux
 
     private static Optional<SpotifyClient.Track> linux() throws IOException, InterruptedException {
         return parseLines(run("playerctl", "-p", "spotify", "metadata",
-                "--format", "{{title}}\n{{artist}}\n{{album}}\n{{status}}"), "Playing");
+                "--format", "{{title}}\n{{artist}}\n{{album}}\n{{status}}\n{{position}}"), "Playing", 0.001); // µs
     }
 
     // -------------------------------------------------------------- helpers
 
-    /** Lines: song, artist, album, state */
-    private static Optional<SpotifyClient.Track> parseLines(String out, String playingState) {
+    /** Lines: song, artist, album, state, position (msPerUnit: milliseconds per unit of the position) */
+    static Optional<SpotifyClient.Track> parseLines(String out, String playingState, double msPerUnit) {
         String[] lines = out.strip().split("\n");
         if (lines.length < 4 || lines[0].isBlank()) return Optional.empty();
         boolean playing = lines[3].trim().equalsIgnoreCase(playingState);
+        if (lines.length > 4) {
+            try { // some languages write "12,5" for 12.5
+                double position = Double.parseDouble(lines[4].trim().replace(',', '.'));
+                PlaybackClock.report(lines[0].trim(), Math.round(position * msPerUnit), System.currentTimeMillis(),
+                        playing, PlaybackClock.PLAYER);
+            } catch (NumberFormatException ignored) {
+            }
+        }
         // macOS / Linux give all artists as one "A, B, C" text
         List<String> artists = List.of(lines[1].trim().split("\\s*,\\s*"));
         return Optional.of(new SpotifyClient.Track(lines[0].trim(), artists, lines[2].trim(), playing));

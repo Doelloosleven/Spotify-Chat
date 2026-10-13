@@ -1,6 +1,7 @@
 package dev.spotifychat;
 
 import com.mojang.brigadier.Command;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
@@ -19,6 +20,7 @@ import net.minecraft.client.gui.components.ChatComponent;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.Identifier;
 import net.minecraft.util.Util;
@@ -27,7 +29,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -51,9 +57,12 @@ import static net.fabricmc.fabric.api.client.command.v2.ClientCommands.literal;
  *   [ key, /irc <message>        write a message to IRC (other Spotify Chat users over Rizon, not via the
  *                                server); T still opens normal chat
  *   ] key, /girc <message>       write to your guild's private IRC (members are let in automatically)
+ *   /irc online                  how many people are in IRC (just the number)
+ *   !queue <song>                in IRC: everyone else gets a button to add the song to their Spotify queue
  *   Someone else's "!spotify" / "!jam" in guild, party or co-op chat is answered in that same channel.
  *
  * Overlay: a "now playing" card on the HUD; /spotify overlay or a key from Controls turns it on/off.
+ * /spotify lyrics shows the current line of the lyrics on it.
  * Arrow keys (changeable): left = previous song, right = next song, down = play/pause.
  *
  * The song is read from the Spotify desktop app on this PC, so no login is needed.
@@ -285,7 +294,10 @@ public class SpotifyChatClient implements ClientModInitializer {
         guildIrcKey = registerKey("key.spotifychat.guild_irc", InputConstants.KEY_RBRACKET, category);
         menuKey = registerKey("key.spotifychat.menu", InputConstants.KEY_F4, category);
 
-        irc = new IrcClient(m -> runOnGame(() -> showIrc(m)), notice -> runOnGame(() -> ircInfo(notice)),
+        irc = new IrcClient(m -> runOnGame(() -> {
+            showIrc(m);
+            songRequest(m);
+        }), notice -> runOnGame(() -> ircInfo(notice)),
                 Mc::joinServer);
         irc.setGuildName(config.hypixelGuild);
         irc.setGuildEnabled(config.guildIrcEnabled);
@@ -352,9 +364,10 @@ public class SpotifyChatClient implements ClientModInitializer {
         // /irc <message>: one message to IRC (same as the [ key)
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, buildContext) -> dispatcher.register(
                 literal("irc")
-                        .executes(ctx -> run(() -> ircInfo("Usage: /irc <message>, or press [ to write to IRC.")))
+                        .executes(ctx -> run(() -> ircInfo("Usage: /irc <message>, or press [ to write to IRC. "
+                                + "/irc online shows how many are in IRC.")))
                         .then(argument("message", StringArgumentType.greedyString())
-                                .executes(ctx -> run(() -> sendIrc(StringArgumentType.getString(ctx, "message")))))));
+                                .executes(ctx -> run(() -> ircCommand(StringArgumentType.getString(ctx, "message")))))));
 
         // /girc <message>: one message to the guild IRC (same as the ] key)
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, buildContext) -> dispatcher.register(
@@ -391,6 +404,17 @@ public class SpotifyChatClient implements ClientModInitializer {
                                 .then(argument("clientId", StringArgumentType.greedyString())
                                         .executes(ctx -> run(() ->
                                                 setClientId(StringArgumentType.getString(ctx, "clientId"))))))
+                        .then(literal("lyrics").executes(ctx -> run(this::toggleLyrics)))
+                        .then(literal("queue")
+                                .executes(ctx -> run(() -> info("Song requests: type !queue <song> in IRC "
+                                        + "(press [). Everyone there gets a button to add it to their Spotify queue.",
+                                        ChatFormatting.GRAY)))
+                                .then(literal("accept").then(argument("id", IntegerArgumentType.integer(1))
+                                        .executes(ctx -> run(() ->
+                                                answerRequest(IntegerArgumentType.getInteger(ctx, "id"), true)))))
+                                .then(literal("decline").then(argument("id", IntegerArgumentType.integer(1))
+                                        .executes(ctx -> run(() ->
+                                                answerRequest(IntegerArgumentType.getInteger(ctx, "id"), false))))))
                         .then(literal("public").executes(ctx -> run(() -> setPublic(true))))
                         .then(literal("private").executes(ctx -> run(() -> setPublic(false))))));
 
@@ -586,7 +610,7 @@ public class SpotifyChatClient implements ClientModInitializer {
     }
 
     private void sendIrc(String text) {
-        if (text.isBlank()) return;
+        if (text.isBlank() || !queueTextOk(text)) return;
         if (!ircConnected()) {
             ircInfo(config.ircEnabled ? "Not connected yet, try again in a moment."
                     : "IRC chat is off. Turn it on in /spotify > IRC.");
@@ -611,7 +635,7 @@ public class SpotifyChatClient implements ClientModInitializer {
     }
 
     private void sendGuildIrc(String text) {
-        if (text.isBlank()) return;
+        if (text.isBlank() || !queueTextOk(text)) return;
         String problem = guildIrcProblem();
         if (problem != null) {
             ircInfo(problem + ".");
@@ -619,6 +643,119 @@ public class SpotifyChatClient implements ClientModInitializer {
         }
         if (IrcClient.outgoing(text).isBlank()) return;
         if (irc.send(text, true) == null) ircInfo("Couldn't send to the guild IRC, try again in a moment.");
+    }
+
+    /** /irc <message>, or /irc online (or who): how many people are in IRC. Only the number, no names. */
+    private void ircCommand(String text) {
+        String t = text.trim().toLowerCase(Locale.ROOT);
+        if (!t.equals("online") && !t.equals("who")) {
+            sendIrc(text);
+            return;
+        }
+        if (!ircConnected()) {
+            ircInfo(config.ircEnabled ? "Not connected yet, try again in a moment."
+                    : "IRC chat is off. Turn it on in /spotify > IRC.");
+            return;
+        }
+        int n = irc.players();
+        String online = n == 1 ? "Just you in IRC right now" : n + " online in IRC (you included)";
+        if (irc.inGuild()) online += ", " + irc.guildOnline() + " in your guild IRC";
+        ircInfo(online + ".");
+    }
+
+    // ---------------------------------------------------------- Song requests
+
+    /** "!queue <song>" in IRC: everyone else in that channel gets a button to add the song to their queue */
+    static final Pattern QUEUE = Pattern.compile("!queue\\s+(\\S.{0,119})", Pattern.CASE_INSENSITIVE);
+    private static final long REQUEST_TTL_MS = 180_000;
+    /** One request per person this often, so nobody can fill your chat with them */
+    private static final long REQUEST_GAP_MS = 15_000;
+    private static final int MAX_REQUESTS = 5;
+
+    private record SongRequest(String from, String song, String target, long at) {}
+
+    // Game thread only
+    private final Map<Integer, SongRequest> requests = new LinkedHashMap<>();
+    private final Map<String, Long> lastRequestFrom = new HashMap<>();
+    private int nextRequestId = 1;
+
+    /** A "!queue" that couldn't work gets a hint instead of being sent */
+    private static boolean queueTextOk(String text) {
+        String t = text.trim();
+        if (!t.toLowerCase(Locale.ROOT).startsWith("!queue")) return true;
+        if (t.length() > 6 && !Character.isWhitespace(t.charAt(6))) return true; // "!queues" isn't ours
+        if (QUEUE.matcher(t).matches()) return true;
+        ircInfo("Usage: !queue <song>  (everyone in IRC gets a button to add it to their Spotify queue)");
+        return false;
+    }
+
+    /** Someone's "!queue <song>" in IRC (or from Discord): shows it with buttons to add it or not */
+    private void songRequest(IrcClient.Message m) {
+        if (!config.songRequests || m.action()) return;
+        Matcher q = QUEUE.matcher(m.text().trim());
+        if (!q.matches()) return;
+        String from = m.nick();
+        if (!m.discord() && from.equalsIgnoreCase(irc.nick())) return; // your own request
+        long now = System.currentTimeMillis();
+        Long last = lastRequestFrom.get(from.toLowerCase(Locale.ROOT));
+        if (last != null && now - last < REQUEST_GAP_MS) return;
+        if (lastRequestFrom.size() > 200) lastRequestFrom.clear();
+        lastRequestFrom.put(from.toLowerCase(Locale.ROOT), now);
+        requests.values().removeIf(r -> now - r.at() > REQUEST_TTL_MS);
+        while (requests.size() >= MAX_REQUESTS) requests.remove(requests.keySet().iterator().next());
+
+        int id = nextRequestId++;
+        String song = q.group(1).trim();
+        requests.put(id, new SongRequest(from, song, m.guild() ? GUILD_IRC_TARGET : IRC_TARGET, now));
+        Mc.chat().addClientSystemMessage(Component.empty()
+                .append(Component.literal(m.guild() ? "[Guild IRC] " : "[IRC] ")
+                        .withStyle(m.guild() ? ChatFormatting.AQUA : ChatFormatting.DARK_GREEN))
+                .append(Component.literal(from).withStyle(ChatFormatting.LIGHT_PURPLE))
+                .append(Component.literal(" wants to queue ").withStyle(ChatFormatting.GRAY))
+                .append(Component.literal(song).withStyle(ChatFormatting.WHITE))
+                .append(Component.literal("  "))
+                .append(button("[Queue it]", ChatFormatting.GREEN, "/spotify queue accept " + id,
+                        "Add the best match on Spotify to your queue"))
+                .append(Component.literal(" "))
+                .append(button("[No thanks]", ChatFormatting.GRAY, "/spotify queue decline " + id,
+                        "Nothing happens, and nobody is told")));
+    }
+
+    private static Component button(String text, ChatFormatting color, String command, String hover) {
+        return Component.literal(text).withStyle(s -> s.withColor(color).withUnderlined(true)
+                .withClickEvent(new ClickEvent.RunCommand(command))
+                .withHoverEvent(new HoverEvent.ShowText(Component.literal(hover))));
+    }
+
+    /** [Queue it] / [No thanks] */
+    private void answerRequest(int id, boolean accept) {
+        SongRequest r = requests.remove(id);
+        if (r == null || System.currentTimeMillis() - r.at() > REQUEST_TTL_MS) {
+            info("That request is gone (requests last 3 minutes).", ChatFormatting.YELLOW);
+            return;
+        }
+        if (!accept) {
+            info("Skipped " + r.from() + "'s request.", ChatFormatting.GRAY);
+            return;
+        }
+        if (!spotify.isLoggedIn()) {
+            // Without the Web API login the mod can't touch your queue: open the search instead
+            openInBrowser("https://open.spotify.com/search/"
+                    + URLEncoder.encode(r.song(), StandardCharsets.UTF_8).replace("+", "%20"), "Search in Spotify");
+            info("Add it to your queue from there. With the phone / web player login (/spotify login) "
+                    + "the mod adds requests for you.", ChatFormatting.YELLOW);
+            return;
+        }
+        info("Adding " + r.song() + " to your queue...", ChatFormatting.GRAY);
+        spotify.queue(r.song()).whenComplete((queued, err) -> runOnGame(() -> {
+            if (err != null) {
+                info("Couldn't queue it: " + rootMessage(err), ChatFormatting.RED);
+                return;
+            }
+            String song = queued.song() + (queued.artist().isBlank() ? "" : " - " + queued.artist());
+            info("Added " + song + " to your queue.", ChatFormatting.GREEN);
+            if (ircConnected()) sendIrcTarget(r.target(), "♫ Queued " + song + " (asked by " + r.from() + ")");
+        }));
     }
 
     private static void ircInfo(String text) {
@@ -785,8 +922,17 @@ public class SpotifyChatClient implements ClientModInitializer {
         Mc.actionBar(Component.literal("Spotify overlay " + (config.overlayEnabled ? "on" : "off")));
     }
 
+    private void toggleLyrics() {
+        config.overlayLyrics = !config.overlayLyrics;
+        config.save();
+        Mc.actionBar(Component.literal("Lyrics on the overlay " + (config.overlayLyrics ? "on" : "off")
+                + (config.overlayLyrics && !config.overlayEnabled ? " (the overlay itself is off: /spotify overlay)" : "")));
+    }
+
     /** Every half second: what the overlay should show. Never waits for the network. */
     private void updateOverlay() {
+        // Windows: where Spotify is in the song comes from the media controls, only needed for the lyrics
+        WindowsMediaSession.want(Util.getPlatform() == Util.OS.WINDOWS && config.overlayEnabled && config.overlayLyrics);
         if (!config.overlayEnabled) {
             overlayTrack = null;
             return;
@@ -853,12 +999,16 @@ public class SpotifyChatClient implements ClientModInitializer {
         info("!jam, /gc /pc /cc !jam  - share your Spotify Jam link (copy it in Spotify first)",
                 ChatFormatting.GRAY);
         info("/spotify overlay  - show/hide the song overlay", ChatFormatting.GRAY);
+        info("/spotify lyrics  - the current line of the lyrics on the overlay, on/off", ChatFormatting.GRAY);
         info("Arrow keys: left = previous, right = next, down = play/pause (change them in the menu)",
                 ChatFormatting.GRAY);
         info("/spotify pause | next | previous  - the same as commands", ChatFormatting.GRAY);
         info("[  - write a message to IRC (other Spotify Chat users, outside the server)", ChatFormatting.GRAY);
         info("/irc <message>  - same, as a command", ChatFormatting.GRAY);
         info("]  or /girc <message>  - write to your guild's private IRC (if your guild has one)", ChatFormatting.GRAY);
+        info("/irc online  - how many people are in IRC", ChatFormatting.GRAY);
+        info("!queue <song>  - in IRC: everyone gets a button to add the song to their Spotify queue",
+                ChatFormatting.GRAY);
         info("/spotify or F4  - open the settings menu", ChatFormatting.GRAY);
         info("/spotify public / private  - who sees the song (now: "
                 + (config.publicMessages ? "public" : "private") + ")", ChatFormatting.GRAY);

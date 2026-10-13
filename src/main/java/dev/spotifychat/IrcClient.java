@@ -93,6 +93,8 @@ public final class IrcClient {
     private volatile String minecraftName = "";
     private final String channel = CHANNEL;
     private volatile int online;
+    /** The bridge bot is in the channel (it's counted in online, but isn't a player) */
+    private volatile boolean bridgeHere;
     private volatile boolean running;
     private final Deque<Pending> unconfirmed = new ConcurrentLinkedDeque<>();
     private final AtomicLong tokens = new AtomicLong();
@@ -131,6 +133,11 @@ public final class IrcClient {
 
     public int online() {
         return online;
+    }
+
+    /** People in the channel, you included (not the bridge bot) */
+    public int players() {
+        return Math.max(1, online - (bridgeHere ? 1 : 0));
     }
 
     /** In the guild channel? */
@@ -172,6 +179,7 @@ public final class IrcClient {
         thread = null;
         status = Status.OFF;
         online = 0;
+        bridgeHere = false;
         leftGuild();
     }
 
@@ -293,6 +301,7 @@ public final class IrcClient {
                 closeSocket();
                 status = Status.CONNECTING;
                 online = 0;
+                bridgeHere = false;
                 leftGuild();
             }
             if (!running) break;
@@ -328,6 +337,7 @@ public final class IrcClient {
     private void session(String baseNick) throws Exception {
         status = Status.CONNECTING;
         online = 0;
+        bridgeHere = false;
         unconfirmed.clear();
         leftGuild();
         Socket s = openTls(SERVER, PORT);
@@ -379,7 +389,11 @@ public final class IrcClient {
                 case "353" -> { // NAMES: "353 me = #channel :names"
                     String ch = parts.length > 3 ? parts[3] : "";
                     if (ch.equalsIgnoreCase(channel)) {
-                        online += trailing.isBlank() ? 0 : trailing.trim().split(" +").length;
+                        for (String n : trailing.trim().split(" +")) {
+                            if (n.isEmpty()) continue;
+                            online++;
+                            if (n.replaceFirst("^[@+%&~]+", "").equalsIgnoreCase(BRIDGE_NICK)) bridgeHere = true;
+                        }
                     } else if (ch.equalsIgnoreCase(guildJoining)) {
                         for (String n : trailing.trim().split(" +")) {
                             String bare = n.replaceFirst("^[@+%&~]+", "");
@@ -405,6 +419,7 @@ public final class IrcClient {
                     if (from.equalsIgnoreCase(nick)) break;
                     if (target.equalsIgnoreCase(channel)) {
                         if (status == Status.CONNECTED) online++;
+                        if (fromBridge) bridgeHere = true;
                         // The bridge bot (re)started: it made a new guild channel, so ask again
                         if (fromBridge) {
                             lastGuildAsk = 0;
@@ -417,12 +432,14 @@ public final class IrcClient {
                 case "PART" -> {
                     if (target.equalsIgnoreCase(channel)) {
                         if (status == Status.CONNECTED) online = Math.max(1, online - 1);
+                        if (fromBridge) bridgeHere = false;
                     } else if (target.equalsIgnoreCase(guildChannel)) {
                         guildMembers.remove(lower(from));
                     }
                 }
                 case "QUIT" -> {
                     if (status == Status.CONNECTED) online = Math.max(1, online - 1);
+                    if (fromBridge) bridgeHere = false;
                     guildMembers.remove(lower(from));
                     String g = guildChannel;
                     if (fromBridge && g != null) {
@@ -559,6 +576,7 @@ public final class IrcClient {
     private void kicked(String by, String reason, Writer session) {
         status = Status.CONNECTING; // no longer in the channel, so nothing can be sent
         online = 0;
+        bridgeHere = false;
         long now = System.currentTimeMillis();
         long at = Math.max(now + REJOIN_DELAY_MS, lastRejoinAt + REJOIN_MIN_GAP_MS);
         lastRejoinAt = at;
