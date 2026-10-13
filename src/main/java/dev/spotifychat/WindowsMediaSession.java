@@ -10,9 +10,9 @@ import java.util.Base64;
 
 /**
  * What Windows' media controls (the ones next to the volume popup) know about Spotify: where it is in the
- * song (for the lyrics; the window title doesn't say) and Spotify's own album cover (for songs the online
- * lookups don't find). Plain Java can't ask them, so a small PowerShell script does, once a second. It only
- * runs while it's needed, and stops by itself when Minecraft closes.
+ * song (for the lyrics; the window title doesn't say), the album and Spotify's own album cover (always the
+ * right ones, unlike online lookups). Plain Java can't ask them, so a small PowerShell script does, once a
+ * second. It only runs while the overlay is on, and stops by itself when Minecraft closes.
  */
 final class WindowsMediaSession {
     private WindowsMediaSession() {}
@@ -36,7 +36,8 @@ final class WindowsMediaSession {
                 if ($s) {
                   $t = $s.GetTimelineProperties(); $p = $s.GetPlaybackInfo(); $m = Await ($s.TryGetMediaPropertiesAsync()) $props
                   $title = ($m.Title -replace '[\\t\\r\\n]', ' ')
-                  [Console]::Out.WriteLine('S' + "`t" + $title + "`t" + [long]$t.Position.TotalMilliseconds + "`t" + $t.LastUpdatedTime.ToUnixTimeMilliseconds() + "`t" + [long]$t.EndTime.TotalMilliseconds + "`t" + $p.PlaybackStatus)
+                  $album = ($m.AlbumTitle -replace '[\\t\\r\\n]', ' ')
+                  [Console]::Out.WriteLine('S' + "`t" + $title + "`t" + [long]$t.Position.TotalMilliseconds + "`t" + $t.LastUpdatedTime.ToUnixTimeMilliseconds() + "`t" + [long]$t.EndTime.TotalMilliseconds + "`t" + $p.PlaybackStatus + "`t" + $album)
                   # The cover, 2 and 6 seconds into the song: right at the change it can still be the last song's
                   if ($title -ne $coverTitle) { $coverTitle = $title; $since = 0 }
                   $since++
@@ -58,7 +59,10 @@ final class WindowsMediaSession {
 
     private record Cover(String song, byte[] bytes, int version) {}
 
+    private record Album(String song, String name) {}
+
     private static volatile Cover cover;
+    private static volatile Album album;
     private static int coverVersion;
     private static Process process;
     private static long nextStart;
@@ -96,6 +100,12 @@ final class WindowsMediaSession {
         return c != null && c.song().equals(PlaybackClock.key(song)) ? COVER_PREFIX + c.version() : null;
     }
 
+    /** The album of this song as Spotify says it, or null if not known (yet) */
+    static String album(String song) {
+        Album a = album;
+        return a != null && a.song().equals(PlaybackClock.key(song)) && !a.name().isBlank() ? a.name() : null;
+    }
+
     /** The image behind a coverUrl, or null if a newer cover replaced it */
     static byte[] coverBytes(String url) {
         Cover c = cover;
@@ -110,6 +120,7 @@ final class WindowsMediaSession {
                     readCover(line);
                     continue;
                 }
+                readAlbum(line);
                 Reading r = parse(line);
                 if (r != null) PlaybackClock.reportPlayer(r.title(), r.positionMs(), r.atMs(), r.playing(), r.lengthMs());
             }
@@ -133,9 +144,16 @@ final class WindowsMediaSession {
         }
     }
 
+    /** The album from an "S" line (its 7th field), also while Spotify has no timeline */
+    static void readAlbum(String line) {
+        String[] f = line.split("\t", -1);
+        if (f.length < 7 || !f[0].equals("S") || f[1].isBlank()) return;
+        album = new Album(PlaybackClock.key(f[1].trim()), f[6].trim());
+    }
+
     record Reading(String title, long positionMs, long atMs, boolean playing, long lengthMs) {}
 
-    /** "S<tab>title<tab>position<tab>updated at<tab>length<tab>status", or null if it says nothing useful */
+    /** "S<tab>title<tab>position<tab>updated at<tab>length<tab>status<tab>album", or null if it says nothing useful */
     static Reading parse(String line) {
         String[] f = line.split("\t", -1);
         if (f.length < 6 || !f[0].equals("S") || f[1].isBlank()) return null;

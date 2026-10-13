@@ -166,10 +166,16 @@ public final class LocalSpotify {
         String out = run("osascript",
                 "-e", "if application \"Spotify\" is running then",
                 "-e", "tell application \"Spotify\"",
-                "-e", "if player state is not stopped then return (name of current track) & linefeed & "
+                "-e", "if player state is not stopped then",
+                "-e", "set art to \"\"",
+                "-e", "try", // older Spotify versions have no artwork url
+                "-e", "set art to artwork url of current track",
+                "-e", "end try",
+                "-e", "return (name of current track) & linefeed & "
                         + "(artist of current track) & linefeed & (album of current track) & linefeed & "
                         + "(player state as string) & linefeed & (player position as string) & linefeed & "
-                        + "(duration of current track as string)",
+                        + "(duration of current track as string) & linefeed & art",
+                "-e", "end if",
                 "-e", "end tell",
                 "-e", "end if");
         return parseLines(out, "playing", 1000, 1); // position in seconds, length in ms
@@ -179,15 +185,15 @@ public final class LocalSpotify {
 
     private static Optional<SpotifyClient.Track> linux() throws IOException, InterruptedException {
         return parseLines(run("playerctl", "-p", "spotify", "metadata",
-                "--format", "{{title}}\n{{artist}}\n{{album}}\n{{status}}\n{{position}}\n{{mpris:length}}"),
+                "--format", "{{title}}\n{{artist}}\n{{album}}\n{{status}}\n{{position}}\n{{mpris:length}}\n{{mpris:artUrl}}"),
                 "Playing", 0.001, 0.001); // both in microseconds
     }
 
     // -------------------------------------------------------------- helpers
 
     /**
-     * Lines: song, artist, album, state, position, length. msPerPosition / msPerLength: milliseconds per unit
-     * of those two (they're for the lyrics).
+     * Lines: song, artist, album, state, position, length, cover. msPerPosition / msPerLength: milliseconds
+     * per unit of those two (they're for the lyrics).
      */
     static Optional<SpotifyClient.Track> parseLines(String out, String playingState, double msPerPosition,
                                                     double msPerLength) {
@@ -211,7 +217,17 @@ public final class LocalSpotify {
         }
         // macOS / Linux give all artists as one "A, B, C" text
         List<String> artists = List.of(lines[1].trim().split("\\s*,\\s*"));
-        return Optional.of(new SpotifyClient.Track(lines[0].trim(), artists, lines[2].trim(), playing));
+        String cover = lines.length > 6 ? spotifyCover(lines[6].trim()) : "";
+        return Optional.of(new SpotifyClient.Track(lines[0].trim(), artists, lines[2].trim(), playing, 0, cover));
+    }
+
+    /**
+     * Spotify's own cover link from the player: only from Spotify's image server. Older Spotify versions on
+     * Linux give an open.spotify.com/image link that doesn't work anymore; it's the same picture on i.scdn.co.
+     */
+    static String spotifyCover(String url) {
+        String u = url.replaceFirst("^https?://open\\.spotify\\.com/image/", "https://i.scdn.co/image/");
+        return u.matches("https://i\\.scdn\\.co/image/[0-9a-fA-F]{8,64}") ? u : "";
     }
 
     static String run(String... cmd) throws IOException, InterruptedException {

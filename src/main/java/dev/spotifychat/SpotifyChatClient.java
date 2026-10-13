@@ -184,6 +184,7 @@ public class SpotifyChatClient implements ClientModInitializer {
         config = ModConfig.load();
         autoUpdateNotice = config.applyNewDefaults();
         spotify = new SpotifyClient(config);
+        TrackInfoLookup.useSpotify(spotify);
         LocalSpotify.startWatching();
 
         // Return false = cancel the message so it never reaches the server.
@@ -1184,10 +1185,10 @@ public class SpotifyChatClient implements ClientModInitializer {
 
     /** Every half second: what the overlay should show. Never waits for the network. */
     private void updateOverlay() {
-        // Windows: the media controls say where Spotify is in the song (lyrics) and have Spotify's own cover,
-        // asked only for the lyrics or once the online lookups missed a cover
+        // Windows: the media controls say where Spotify is in the song (lyrics), and have the album and
+        // Spotify's own cover
         boolean windows = Util.getPlatform() == Util.OS.WINDOWS;
-        WindowsMediaSession.want(windows && config.overlayEnabled && (config.overlayLyrics || appCovers));
+        WindowsMediaSession.want(windows && config.overlayEnabled);
         if (!config.overlayEnabled) {
             overlayTrack = null;
             return;
@@ -1212,21 +1213,20 @@ public class SpotifyChatClient implements ClientModInitializer {
             overlayTrack = null;
             return;
         }
+        if (windows) t = withAppInfo(t);
         TrackInfoLookup.Info info = needsInfo(t) ? TrackInfoLookup.peek(t.artist(), t.song()) : null;
         if (info != null) t = withInfo(t, info);
-        if (windows && config.overlayShowCover) {
-            String appCover = WindowsMediaSession.coverUrl(t.song());
-            if (appCover != null) {
-                t = t.withInfo(t.album(), t.artists(), appCover); // Spotify's own: always the right one
-            } else if (info != null && t.coverUrl().isBlank()) {
-                appCovers = true; // looked up, no cover found: ask Spotify from now on
-            }
-        }
         overlayTrack = t;
     }
 
-    /** Windows: the online lookups missed a cover once, so Spotify's own covers are read from now on */
-    private boolean appCovers;
+    /** Windows: the album and cover Spotify itself gives the media controls (always the right ones) */
+    private static SpotifyClient.Track withAppInfo(SpotifyClient.Track t) {
+        String album = WindowsMediaSession.album(t.song());
+        String cover = WindowsMediaSession.coverUrl(t.song());
+        if (album == null && cover == null) return t;
+        return t.withInfo(t.album().isBlank() && album != null ? album : t.album(), t.artists(),
+                cover != null ? cover : t.coverUrl());
+    }
 
     private boolean showTriggerPublicly() {
         return config.publicMessages && config.showTrigger;
@@ -1414,6 +1414,10 @@ public class SpotifyChatClient implements ClientModInitializer {
      * (usually already cached). Spotify's own spelling of the main artist is kept.
      */
     private SpotifyClient.Track addInfo(SpotifyClient.Track t) {
+        if (Util.getPlatform() == Util.OS.WINDOWS && t.album().isBlank()) {
+            String album = WindowsMediaSession.album(t.song()); // known while the overlay is on
+            if (album != null) t = t.withInfo(album, t.artists(), t.coverUrl());
+        }
         boolean needAlbum = config.showAlbum && t.album().isBlank();
         boolean needFeatures = config.showArtist && config.showFeatures && t.artists().size() <= 1;
         if (!needAlbum && !needFeatures) return t;

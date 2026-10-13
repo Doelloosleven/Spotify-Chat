@@ -1,5 +1,6 @@
 package dev.spotifychat;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -16,16 +17,17 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /**
- * The Spotify desktop app's window title only has the main artist and no album, so the album and
- * featured artists are looked up in Deezer's free public API (no account or key), with Apple's free iTunes
- * search as a fallback for the album and cover. Results are cached
- * per song, and the background check starts the lookup as soon as a new song plays, so sharing
- * doesn't have to wait for it.
+ * The Spotify desktop app's window title only has the main artist and no album, so the album, featured
+ * artists and cover are looked up: in Spotify's own search when you're logged in (exact), else in Deezer's
+ * free public API (no account or key), then Apple's iTunes search, then NetEase Cloud Music's. Only the song
+ * and artist name are sent. Results are cached per song, and the background check starts the lookup as
+ * soon as a new song plays, so sharing doesn't have to wait for it.
  */
 public final class TrackInfoLookup {
     private TrackInfoLookup() {}
@@ -39,6 +41,12 @@ public final class TrackInfoLookup {
     }
 
     private static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(4)).build();
+    /** For Spotify's own search while you're logged in (set once at start-up) */
+    private static volatile SpotifyClient spotify;
+
+    static void useSpotify(SpotifyClient client) {
+        spotify = client;
+    }
     private static final Map<String, CompletableFuture<Info>> CACHE = new ConcurrentHashMap<>();
 
     /** Starts the lookup in the background if it isn't cached yet. */
@@ -83,20 +91,59 @@ public final class TrackInfoLookup {
     }
 
     /**
-     * Deezer by "artist title", then by the title alone (the artist may be written differently there),
-     * then Apple's iTunes search. Names are compared loosely: "JAŸ-Z" is "Jay-Z", accents don't count.
+     * Spotify itself (logged in), Deezer by "artist title", Deezer by the title alone (the artist may be written
+     * differently there), Apple's iTunes search, then NetEase. The first that has the song wins. Names are
+     * compared loosely: "JAŸ-Z" is "Jay-Z", accents don't count. Throws only if none had it and one of them
+     * didn't answer, so it's tried again later.
      */
     private static Info search(String artist, String song) {
         String title = cleanTitle(song);
-        try {
-            Info info = deezer(artist, title, artist + " " + title);
-            if (info == null) info = deezer(artist, title, title);
-            if (info == null) info = itunes(artist, title);
-            return info == null ? Info.NONE : info;
-        } catch (Exception e) {
-            SpotifyChatClient.LOGGER.debug("Track info lookup failed for {} - {}", artist, song, e);
-            throw new RuntimeException(e);
+        SpotifyClient s = spotify;
+        List<Callable<Info>> sources = new ArrayList<>();
+        if (s != null && s.isLoggedIn()) sources.add(() -> s.findInfo(artist, title, song));
+        sources.add(() -> deezer(artist, title, artist + " " + title));
+        sources.add(() -> deezer(artist, title, title));
+        sources.add(() -> itunes(artist, title));
+        sources.add(() -> netease(artist, title));
+        Exception failed = null;
+        for (Callable<Info> source : sources) {
+            try {
+                Info info = source.call();
+                if (info != null) return info;
+            } catch (Exception e) {
+                failed = e;
+            }
         }
+        if (failed == null) return Info.NONE;
+        SpotifyChatClient.LOGGER.debug("Track info lookup failed for {} - {}", artist, song, failed);
+        throw new RuntimeException(failed);
+    }
+
+    /**
+     * Spotify's search answer: the exact song by that artist, with its album, all its artists and its cover.
+     * Null if it isn't there.
+     */
+    static Info fromSpotify(JsonElement root, String artist, String title, String song) {
+        if (!root.isJsonObject() || !root.getAsJsonObject().has("tracks")) return null;
+        JsonElement items = root.getAsJsonObject().getAsJsonObject("tracks").get("items");
+        if (items == null || !items.isJsonArray()) return null;
+        for (JsonElement el : items.getAsJsonArray()) {
+            if (!el.isJsonObject()) continue;
+            JsonObject t = el.getAsJsonObject();
+            String name = str(t, "name");
+            if (!name.equalsIgnoreCase(song) && !loose(cleanTitle(name)).equals(loose(title))) continue;
+            List<String> artists = new ArrayList<>();
+            JsonElement list = t.get("artists");
+            if (list != null && list.isJsonArray()) {
+                for (JsonElement a : list.getAsJsonArray()) if (a.isJsonObject()) artists.add(str(a.getAsJsonObject(), "name"));
+            }
+            if (artists.isEmpty() || !sameArtist(artists.getFirst(), artist)) continue;
+            JsonElement album = t.get("album");
+            if (album == null || !album.isJsonObject()) continue;
+            return new Info(str(album.getAsJsonObject(), "name"), artists,
+                    SpotifyClient.smallestImageAtLeast(album.getAsJsonObject(), 128));
+        }
+        return null;
     }
 
     /** Null if Deezer doesn't have it; throws if Deezer didn't answer properly */
@@ -152,6 +199,46 @@ public final class TrackInfoLookup {
             return new Info(str(t, "collectionName"), List.of(), cover);
         }
         return null;
+    }
+
+    /** NetEase Cloud Music's search: album, artists and cover of the exact song by that artist. Null if not found. */
+    private static Info netease(String artist, String title) throws Exception {
+        return fromNetease(get("https://music.163.com/api/cloudsearch/pc?type=1&limit=10&s="
+                + URLEncoder.encode(artist + " " + title, StandardCharsets.UTF_8)), artist, title);
+    }
+
+    static Info fromNetease(JsonObject root, String artist, String title) {
+        JsonElement result = root.get("result");
+        if (result == null || !result.isJsonObject()) return null;
+        JsonElement songs = result.getAsJsonObject().get("songs");
+        if (songs == null || !songs.isJsonArray()) return null;
+        for (JsonElement el : songs.getAsJsonArray()) {
+            if (!el.isJsonObject()) continue;
+            JsonObject s = el.getAsJsonObject();
+            if (!loose(cleanTitle(str(s, "name"))).equals(loose(title))) continue;
+            List<String> artists = new ArrayList<>();
+            JsonElement ar = s.get("ar");
+            if (ar != null && ar.isJsonArray()) {
+                for (JsonElement a : ar.getAsJsonArray()) if (a.isJsonObject()) artists.add(str(a.getAsJsonObject(), "name"));
+            }
+            if (artists.isEmpty() || !sameArtist(artists.getFirst(), artist)) continue;
+            JsonElement al = s.get("al");
+            if (al == null || !al.isJsonObject()) continue;
+            return new Info(str(al.getAsJsonObject(), "name"), artists, neteaseCover(str(al.getAsJsonObject(), "picUrl")));
+        }
+        return null;
+    }
+
+    /** NetEase's cover links are http and full size: https, 300x300. Only their own image hosts. */
+    static String neteaseCover(String url) {
+        URI uri;
+        try {
+            uri = URI.create(url.replaceFirst("^http://", "https://"));
+        } catch (IllegalArgumentException e) {
+            return "";
+        }
+        if (!"https".equals(uri.getScheme()) || uri.getHost() == null || !uri.getHost().endsWith(".music.126.net")) return "";
+        return "https://" + uri.getHost() + uri.getRawPath() + "?param=300y300";
     }
 
     /** Lower case without accents, spaces or punctuation: "JAŸ-Z" and "Jay Z" are both "jayz" */

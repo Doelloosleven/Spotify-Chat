@@ -394,8 +394,26 @@ public class SpotifyClient {
         return Optional.of(new Track(song, names, album, playing, playing ? 0 : changedAt, cover));
     }
 
+    /**
+     * Off the game thread, logged in only. The song's album, all its artists and its cover on Spotify itself,
+     * or null if the search has no song with this title by this artist.
+     */
+    public TrackInfoLookup.Info findInfo(String artist, String title, String song) throws IOException, InterruptedException {
+        HttpResponse<String> res = http.send(HttpRequest.newBuilder(URI.create(
+                        "https://api.spotify.com/v1/search?type=track&limit=10&q=" + enc(title + " " + artist)))
+                .timeout(Duration.ofSeconds(8))
+                .header("Authorization", "Bearer " + getAccessToken())
+                .GET().build(), HttpResponse.BodyHandlers.ofString());
+        if (res.statusCode() == 401) {
+            synchronized (this) { accessToken = null; }
+            throw new IOException("Spotify rejected the login");
+        }
+        if (res.statusCode() != 200) throw new IOException("Spotify search failed (" + res.statusCode() + ")");
+        return TrackInfoLookup.fromSpotify(JsonParser.parseString(res.body()), artist, title, song);
+    }
+
     /** Spotify lists cover sizes 640/300/64; the overlay only needs a small one. */
-    private static String smallestImageAtLeast(JsonObject o, int minSize) {
+    static String smallestImageAtLeast(JsonObject o, int minSize) {
         if (!o.has("images") || !o.get("images").isJsonArray()) return "";
         String best = "";
         int bestSize = Integer.MAX_VALUE;

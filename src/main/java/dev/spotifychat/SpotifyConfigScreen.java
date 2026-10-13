@@ -213,7 +213,8 @@ public class SpotifyConfigScreen extends Screen {
         toggle(right, y, colW, rowH, "Lyrics",
                 "The song's lyrics under it, in time with the song: the line being sung fills up, the next "
                         + "one waits below. Lyrics come from "
-                        + "lrclib.net (the song's name and artist are sent there). Not every song has them. "
+                        + "lrclib.net, or NetEase Cloud Music and Kugou when lrclib doesn't have the song (only its "
+                        + "name and artist are sent). Not every song has them. "
                         + "Also: /spotify lyrics",
                 () -> cfg.overlayLyrics, v -> cfg.overlayLyrics = v);
         y += step;
